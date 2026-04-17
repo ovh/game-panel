@@ -1,0 +1,42 @@
+# ---- Secrets / env ----
+.env
+.env.*
+!.env.example
+!.env.template
+
+# ---- Node / packages ----
+node_modules/
+**/node_modules/
+
+# ---- Builds ----
+dist/
+build/
+out/
+coverage/
+**/dist/
+**/build/
+**/out/
+**/coverage/
+
+# ---- Databases ----
+**/*.db
+
+# ---- Logs ----
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ---- OS / Editor ----
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# ---- Misc ----
+*.pem
+*.key
+
+# ---- Dev ----
+/temp

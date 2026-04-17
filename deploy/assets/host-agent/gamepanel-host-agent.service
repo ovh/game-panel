@@ -1,0 +1,15 @@
+[Unit]
+Description=GamePanel Host Agent
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStartPre=/bin/rm -f /run/gamepanel/host-agent.sock
+ExecStart=/usr/local/sbin/gamepanel-host-agent
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

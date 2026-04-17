@@ -1,0 +1,14 @@
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # Keep API requests untouched
+  RewriteCond %{REQUEST_URI} !^/api/ [NC]
+
+  # Serve existing files/folders as-is
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+
+  # SPA fallback for direct links like /account/complete or /servers/:id/confirm-delete
+  RewriteRule ^ index.html [L]
+</IfModule>
