@@ -458,6 +458,7 @@ install_sshd_match_config() {
   [[ -f "$source_sshd_cfg" ]] || die "Missing SSHD config file: $source_sshd_cfg"
 
   install -D -m 0644 "$source_sshd_cfg" /etc/ssh/sshd_config.d/gamepanel-sftp.conf
+  install -d -m 0755 /run/sshd
   require_cmd sshd
   sshd -t
   reload_ssh_service
