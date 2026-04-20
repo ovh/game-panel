@@ -191,7 +191,7 @@ If you still need infrastructure:
 From your Linux shell, run:
 
 ```bash
-curl -fsSL https://github.com/ovh/game-panel/deploy/install.sh | sudo bash
+curl -fsSL https://raw.github.com/ovh/game-panel/main/deploy/install.sh | sudo bash
 ```
 
 During installation, you will be prompted for:
