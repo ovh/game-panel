@@ -164,6 +164,8 @@ class Handler(BaseHTTPRequestHandler):
             password = payload.get("password")
             if not isinstance(password, str) or len(password) < 1:
                 raise ValueError("Invalid password")
+            if "\n" in password or "\r" in password:
+                raise ValueError("Password cannot contain line breaks")
             run(["/usr/sbin/chpasswd"], input_text=f"{username}:{password}\n")
             return {"ok": True}
 

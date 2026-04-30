@@ -31,6 +31,10 @@ router.post('/password', requireServerPermission('sftp.manage'), async (req: Aut
         const server = await getServerOrThrow(serverId);
 
         const password = String(req.body?.password ?? '');
+        if (/[\r\n]/.test(password)) {
+            return res.status(400).json({ error: 'Password cannot contain line breaks' });
+        }
+
         if (!password || password.length < 10) {
             return res.status(400).json({ error: 'Password must be at least 10 chars' });
         }

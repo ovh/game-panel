@@ -14,6 +14,10 @@ const validatePassword = (password: string, confirm: string): string | null => {
     return 'Passwords do not match';
   }
 
+  if (/[\r\n]/.test(password)) {
+    return 'Password cannot contain line breaks';
+  }
+
   if (password.length < 10) {
     return 'Password must be at least 10 characters';
   }
