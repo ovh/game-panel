@@ -1,4 +1,4 @@
-import type { ComponentProps, ReactNode } from 'react';
+import { useEffect, type ComponentProps, type ReactNode } from 'react';
 import {
   Modal,
   ModalBody,
@@ -21,12 +21,23 @@ export function AppModal({
   positionerStyle,
   ...props
 }: AppModalProps) {
+  useEffect(() => {
+    if (props.open) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [props.open]);
+
   return (
     <Modal
       {...props}
       backdropStyle={{
-        backgroundColor: 'rgba(2, 6, 23, 0.78)',
-        opacity: 1,
+        backgroundColor: 'var(--ods-theme-backdrop-background-color, rgba(2, 6, 23, 0.78))',
+        opacity: 'var(--ods-theme-backdrop-opacity, 0.78)' as unknown as number,
         ...backdropStyle,
       }}
       positionerStyle={{

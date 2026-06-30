@@ -2,12 +2,15 @@ import { getConfig } from '../config.js';
 import { getAppVersion } from '../utils/appInfo.js';
 import { logError } from '../utils/logger.js';
 import { nowIso } from '../utils/time.js';
+import type { ServerProvider } from '../providers/types.js';
 
 const TELEMETRY_TIMEOUT_MS = 5_000;
 
 type GameInstalledTelemetryInput = {
   serverId: number;
-  gameKey: string;
+  provider: ServerProvider;
+  catalogId: string | null;
+  dockerImage?: string | null;
 };
 
 function normalizeBaseUrl(value: string | null): string | null {
@@ -26,14 +29,6 @@ function getTelemetryConfig() {
     frontendUrl: config.frontendUrl,
     version: getAppVersion(),
   };
-}
-
-function getPanelDomain(frontendUrl: string): string | null {
-  try {
-    return new URL(frontendUrl).hostname || null;
-  } catch {
-    return null;
-  }
 }
 
 async function postJson(url: string, payload: unknown): Promise<void> {
@@ -87,13 +82,17 @@ export function sendGameInstalledTelemetry(input: GameInstalledTelemetryInput): 
       instanceId,
       instanceSecret,
       eventType: 'game.installed',
-      gameKey: input.gameKey,
+      provider: input.provider,
+      catalogId: input.catalogId,
+      dockerImage: input.provider === 'external' ? input.dockerImage ?? null : null,
       at,
     },
     {
       instanceId,
       serverId: input.serverId,
-      gameKey: input.gameKey,
+      provider: input.provider,
+      catalogId: input.catalogId,
+      dockerImage: input.provider === 'external' ? input.dockerImage ?? null : null,
       eventType: 'game.installed',
     }
   );
@@ -110,13 +109,17 @@ export function sendGameUninstalledTelemetry(input: GameInstalledTelemetryInput)
       instanceId,
       instanceSecret,
       eventType: 'game.uninstalled',
-      gameKey: input.gameKey,
+      provider: input.provider,
+      catalogId: input.catalogId,
+      dockerImage: input.provider === 'external' ? input.dockerImage ?? null : null,
       at,
     },
     {
       instanceId,
       serverId: input.serverId,
-      gameKey: input.gameKey,
+      provider: input.provider,
+      catalogId: input.catalogId,
+      dockerImage: input.provider === 'external' ? input.dockerImage ?? null : null,
       eventType: 'game.uninstalled',
     }
   );

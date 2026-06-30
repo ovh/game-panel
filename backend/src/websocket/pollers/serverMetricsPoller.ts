@@ -3,9 +3,10 @@ import { serverRepository, serverMetricsRepository } from '../../database/index.
 import * as dockerUtils from '../../utils/docker.js';
 import type { AuthenticatedWebSocket } from '../types.js';
 import { sendSafe } from '../auth.js';
-import { round2 } from '../subscriptions.js';
+import { round2 } from '../../utils/number.js';
 import { logError } from '../../utils/logger.js';
 import { nowIso } from '../../utils/time.js';
+import { getCachedServerStorageDiskUsagePercent } from '../../utils/diskUsage.js';
 
 const RETENTION_DAYS = 1;
 const PRUNE_EVERY_MS = 30 * 60_000;
@@ -45,8 +46,17 @@ export function startServerMetricsPoller(wss: WebSocketServer, opts?: ServerMetr
 
                 const stats = await dockerUtils.getContainerStats(server.docker_container_id);
 
-                // Store one row per tick
-                await serverMetricsRepository.create(server.id, stats.cpuUsage, stats.memoryUsage);
+                const diskUsage = await getCachedServerStorageDiskUsagePercent(server.id);
+
+                // Store one row per tick. Disk is cached and refreshed independently.
+                await serverMetricsRepository.create(
+                    server.id,
+                    stats.cpuUsage,
+                    stats.memoryUsage,
+                    diskUsage,
+                    stats.networkUsage.in,
+                    stats.networkUsage.out
+                );
 
                 const payload = {
                     type: 'metrics:update',
@@ -54,10 +64,11 @@ export function startServerMetricsPoller(wss: WebSocketServer, opts?: ServerMetr
                     metrics: {
                         cpuUsage: round2(stats.cpuUsage), // %
                         memoryUsage: round2(stats.memoryUsage), // %
-                        // memoryBytes: stats.memoryBytes, // bytes
+                        diskUsage: round2(diskUsage), // %
+                        network: stats.networkUsage, // bytes/s
                     },
                     timestamp: nowIso(),
-                };
+                } as const;
 
                 wss.clients.forEach((client) => {
                     const ws = client as AuthenticatedWebSocket;

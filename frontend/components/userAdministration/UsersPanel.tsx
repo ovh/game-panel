@@ -1,5 +1,6 @@
-import { Plus, Settings2, Shield, Trash2, Users } from 'lucide-react';
-import { AppButton } from '../../src/ui/components';
+import { Plus, Settings2, Shield, Users } from 'lucide-react';
+import { Icon } from '@ovhcloud/ods-react';
+import { AppButton, AppCard } from '../../src/ui/components';
 
 interface PanelUserListItem {
   id: number;
@@ -35,7 +36,7 @@ export function UsersPanel({
   deleteUserLoading,
 }: UsersPanelProps) {
   return (
-    <section className="rounded-xl border border-gray-800 bg-[#111827] p-5 md:p-6">
+    <AppCard className="p-5 md:p-6">
       <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-wrap items-center gap-3">
           <h2 className="flex items-center gap-2 text-xl font-semibold text-white">
@@ -74,12 +75,10 @@ export function UsersPanel({
         {users.length === 0 && !usersLoading && <p className="text-sm text-gray-400">No users found.</p>}
 
         {users.map((u) => (
-          <div
+          <AppCard
             key={u.id}
-            className={`w-full rounded-lg border px-4 py-4 transition-colors ${
-              highlightedUserId === u.id
-                ? 'border-gray-600 bg-[#152238]'
-                : 'border-gray-700 bg-[#1f2937] hover:border-gray-500'
+            className={`w-full px-4 py-4 transition-colors ${
+              highlightedUserId === u.id ? 'ring-1 ring-[var(--gp-ods-accent-primary)]/40' : ''
             }`}
           >
             <div className="flex items-center justify-between gap-4">
@@ -91,7 +90,7 @@ export function UsersPanel({
                   <div className="flex items-center gap-2">
                     <span className="font-semibold text-white">{u.username}</span>
                     {u.isRoot && (
-                      <span className="inline-flex items-center gap-1 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-xs text-amber-300">
+                      <span className="inline-flex items-center gap-1 rounded border border-amber-500/60 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-500/10 px-2 py-0.5 text-xs text-amber-700 dark:text-amber-300">
                         <Shield className="h-3.5 w-3.5" />
                         Super Admin
                       </span>
@@ -120,15 +119,15 @@ export function UsersPanel({
                     title={`Delete user ${u.username}`}
                     className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-red-500/45 bg-[#2a1219] text-sm text-red-200 hover:border-red-400 hover:text-red-100 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    <Trash2 className="h-4 w-4" />
+                    <Icon name="trash" />
                   </AppButton>
                 </div>
               )}
             </div>
-          </div>
+          </AppCard>
         ))}
       </div>
-    </section>
+    </AppCard>
   );
 }
 

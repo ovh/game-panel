@@ -2,7 +2,10 @@ import { Router, type Request, type Response } from 'express';
 import { requireGlobalPermission } from '../middleware/auth.js';
 import { userRepository } from '../database/index.js';
 import { hashPassword } from '../utils/auth.js';
-import { logError } from '../utils/logger.js';
+import { sendRouteError } from '../utils/routeErrors.js';
+import { PERMISSIONS } from '../permissions.js';
+import { toIsoTimestamp } from '../utils/time.js';
+import { optionalBoolean, requireBodyObject, requirePositiveInt } from '../utils/httpValidation.js';
 
 const router = Router();
 
@@ -41,46 +44,42 @@ function isValidUsername(value: string): boolean {
     return value.length > 0 && value.length <= 12;
 }
 
-/**
- * GET /users
- * List all users
- */
+// GET /api/users
 router.get(
     '/',
-    requireGlobalPermission('users.manage'),
+    requireGlobalPermission(PERMISSIONS.users.manage),
     async (_req: Request, res: Response) => {
         try {
             const users = await userRepository.list();
 
-            const normalized = users.map((u: any) => ({
+            const normalized = users.map((u) => ({
                 id: u.id,
                 username: u.username,
                 isRoot: Boolean(u.is_root),
                 isEnabled: Boolean(u.is_enabled),
                 globalPermissions: parsePermsJson(u.global_permissions_json),
-                createdAt: u.created_at,
-                updatedAt: u.updated_at,
+                createdAt: toIsoTimestamp(u.created_at),
+                updatedAt: toIsoTimestamp(u.updated_at),
             }));
 
             return res.json({ users: normalized });
         } catch (error) {
-            logError('ROUTE:USERS:LIST', error);
-            return res.status(500).json({ error: 'Failed to list users' });
+            return sendRouteError(res, error, {
+                route: 'ROUTE:USERS:LIST',
+                fallbackMessage: 'Failed to list users',
+            });
         }
     }
 );
 
-/**
- * PATCH /users/:id
- * Update user
- */
+// PATCH /api/users/:id
 router.patch(
     '/:id',
-    requireGlobalPermission('users.manage'),
+    requireGlobalPermission(PERMISSIONS.users.manage),
     async (req: Request, res: Response) => {
         try {
-            const id = Number(req.params.id);
-            if (!id) return res.status(400).json({ error: 'Invalid user id' });
+            const id = requirePositiveInt(req.params.id, 'Invalid user id');
+            const body = requireBodyObject(req.body);
 
             const user = await userRepository.findById(id);
             if (!user) return res.status(404).json({ error: 'User not found' });
@@ -89,7 +88,7 @@ router.patch(
                 return res.status(403).json({ error: 'Root user cannot be modified' });
             }
 
-            const usernameRaw = asNonEmptyString((req.body as any)?.username);
+            const usernameRaw = asNonEmptyString(body.username);
 
             const normalizedUsername = usernameRaw ? normalizeUsername(usernameRaw) : undefined;
             if (normalizedUsername !== undefined) {
@@ -103,7 +102,7 @@ router.patch(
                 }
             }
 
-            const globalPermissionsRaw = (req.body as any)?.globalPermissions;
+            const globalPermissionsRaw = body.globalPermissions;
             const globalPermissions =
                 globalPermissionsRaw === undefined ? undefined : asStringArray(globalPermissionsRaw);
 
@@ -115,7 +114,7 @@ router.patch(
                 return res.status(400).json({ error: 'Wildcard permission "*" is reserved for root' });
             }
 
-            const isEnabled = typeof (req.body as any)?.is_enabled === 'boolean' ? (req.body as any).is_enabled : undefined;
+            const isEnabled = optionalBoolean(body.isEnabled, 'isEnabled must be a boolean');
 
             await userRepository.updateUser(id, {
                 username: normalizedUsername ?? undefined,
@@ -125,22 +124,22 @@ router.patch(
 
             return res.json({ success: true });
         } catch (error) {
-            logError('ROUTE:USERS:UPDATE', error, { userId: req.params.id });
-            return res.status(500).json({ error: 'Failed to update user' });
+            return sendRouteError(res, error, {
+                route: 'ROUTE:USERS:UPDATE',
+                fallbackMessage: 'Failed to update user',
+                logContext: { userId: req.params.id },
+            });
         }
     }
 );
 
-/**
- * DELETE /users/:id
- */
+// DELETE /api/users/:id
 router.delete(
     '/:id',
-    requireGlobalPermission('users.manage'),
+    requireGlobalPermission(PERMISSIONS.users.manage),
     async (req: Request, res: Response) => {
         try {
-            const id = Number(req.params.id);
-            if (!id) return res.status(400).json({ error: 'Invalid user id' });
+            const id = requirePositiveInt(req.params.id, 'Invalid user id');
 
             const user = await userRepository.findById(id);
             if (!user) return res.status(404).json({ error: 'User not found' });
@@ -153,24 +152,25 @@ router.delete(
 
             return res.json({ success: true });
         } catch (error) {
-            logError('ROUTE:USERS:DELETE', error, { userId: req.params.id });
-            return res.status(500).json({ error: 'Failed to delete user' });
+            return sendRouteError(res, error, {
+                route: 'ROUTE:USERS:DELETE',
+                fallbackMessage: 'Failed to delete user',
+                logContext: { userId: req.params.id },
+            });
         }
     }
 );
 
-/**
- * POST /users/:id/reset-password
- */
+// POST /api/users/:id/reset-password
 router.post(
     '/:id/reset-password',
-    requireGlobalPermission('users.manage'),
+    requireGlobalPermission(PERMISSIONS.users.manage),
     async (req: Request, res: Response) => {
         try {
-            const id = Number(req.params.id);
-            if (!id) return res.status(400).json({ error: 'Invalid user id' });
+            const id = requirePositiveInt(req.params.id, 'Invalid user id');
+            const body = requireBodyObject(req.body);
 
-            const newPassword = asNonEmptyString((req.body as any)?.newPassword);
+            const newPassword = asNonEmptyString(body.newPassword);
             if (!newPassword || newPassword.length < 8) {
                 return res.status(400).json({ error: 'Password must be at least 8 characters' });
             }
@@ -187,8 +187,11 @@ router.post(
 
             return res.json({ success: true });
         } catch (error) {
-            logError('ROUTE:USERS:RESET_PASSWORD', error, { userId: req.params.id });
-            return res.status(500).json({ error: 'Failed to reset password' });
+            return sendRouteError(res, error, {
+                route: 'ROUTE:USERS:RESET_PASSWORD',
+                fallbackMessage: 'Failed to reset password',
+                logContext: { userId: req.params.id },
+            });
         }
     }
 );

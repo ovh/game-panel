@@ -3,6 +3,8 @@ import { Login } from './components/Login';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { type GameServer } from './types/gameServer';
 import { apiClient } from './utils/api';
+import { clearAppCache } from './utils/appStorage';
+import { OVHCLOUD_IMAGES } from './utils/ovhcloudCatalog';
 import { AppShell } from './components/app/AppShell';
 import { createWebSocketMessageHandler } from './components/app/createWebSocketMessageHandler';
 import { useAuthSession } from './components/app/useAuthSession';
@@ -24,8 +26,6 @@ import {
   type LogPromptRule,
   MAX_SERVER_LOG_LINES,
   SERVER_LOG_HISTORY_LIMIT,
-  normalizeCatalogLogPrompts,
-  normalizeGameIdentifier,
 } from './components/app/appRuntime';
 import {
   type LogEntry,
@@ -33,7 +33,6 @@ import {
   type ServerHistoryEntry,
   type ServerLogs,
   type ServerMetricHistoryPoint,
-  extractServerPorts,
   mapBackendStatusToUi,
 } from './utils/serverRuntime';
 
@@ -69,9 +68,6 @@ function AppContent() {
   const [serverHistoryById, setServerHistoryById] = useState<ServerHistoryById>({});
   const [activeConsoleTab, setActiveConsoleTab] = useState<string | null>('cli-console');
   const [openConsoleTabs, setOpenConsoleTabs] = useState<string[]>([]);
-  const [consoleReadyByServer, setConsoleReadyByServer] = useState<Record<string, boolean | null>>(
-    {}
-  );
   const [consoleTerminalTarget, setConsoleTerminalTarget] = useState<ConsoleTerminalTarget | null>(
     null
   );
@@ -83,12 +79,15 @@ function AppContent() {
   const [gameNamesByKey, setGameNamesByKey] = useState<Record<string, string>>({});
   const [logPromptRules, setLogPromptRules] = useState<LogPromptRule[]>([]);
   const serversRef = useRef<GameServer[]>([]);
-  const consoleReadyRef = useRef<Record<string, boolean | null>>({});
   const suppressReplayAfterClearRef = useRef<Record<string, boolean>>({});
+  // Container the open log subscription is following, per server. Used to avoid a
+  // redundant re-subscribe (which replays the whole backlog and duplicates logs)
+  // when a server flips to "running" without its container actually changing.
+  const subscribedLogsContainerIdRef = useRef<Record<string, string | null>>({});
   const lastInstallProgressLogRef = useRef<Record<number, number>>({});
   const handleWebSocketMessageRef = useRef<(message: any) => void>(() => {});
+  const handleLogoutRef = useRef<() => void>(() => {});
   const subscribedMetricsServerIdsRef = useRef<Set<number>>(new Set());
-  const subscribedConsoleStatusServerIdsRef = useRef<Set<number>>(new Set());
   const {
     activeLogPromptToasts,
     setActiveLogPromptToasts,
@@ -106,45 +105,23 @@ function AppContent() {
   const [installProgressPercent, setInstallProgressPercent] = useState<number | null>(null);
   const [installStatus, setInstallStatus] = useState<string | null>(null);
   const [installServerId, setInstallServerId] = useState<number | null>(null);
+  const [installInteraction, setInstallInteraction] = useState<import('./types/gameServer').InstallInteraction | null>(null);
+  const [installPlan, setInstallPlan] = useState<import('./types/gameServer').InstallStep[]>([]);
   const [installModalOpen, setInstallModalOpen] = useState(false);
   const metricsServerIdsKey = gameServers
     .map((server) => server.id)
     .sort()
     .join(',');
 
-  const loadCatalogMetadata = useCallback(async () => {
-    try {
-      const catalogResult = await apiClient.getCatalogGames();
-      const mapping: Record<string, string> = {};
-      const nextRules: LogPromptRule[] = [];
-      catalogResult.games.forEach((game) => {
-        mapping[game.shortname] = game.gamename;
+  // Tracks which LinuxGSM game keys have already had their metadata fetched this session.
+  const loadedLgsmGameKeysRef = useRef<Set<string>>(new Set());
 
-        const prompts = normalizeCatalogLogPrompts(game.logPrompts);
-        prompts.forEach((prompt) => {
-          const gameKeys = Array.from(
-            new Set(
-              [game.shortname, game.gamename, game.gameservername]
-                .map((value) => normalizeGameIdentifier(value))
-                .filter(Boolean)
-            )
-          );
-          if (!gameKeys.length) return;
-          nextRules.push({
-            gameKeys,
-            gameName: game.gamename || game.shortname,
-            title: prompt.title || 'Action required',
-            match: prompt.match,
-            action: prompt.action,
-          });
-        });
-      });
-      setGameNamesByKey(mapping);
-      setLogPromptRules(nextRules);
-    } catch {
-      setGameNamesByKey({});
-      setLogPromptRules([]);
-    }
+  const loadCatalogMetadata = useCallback(() => {
+    const mapping: Record<string, string> = {};
+    OVHCLOUD_IMAGES.forEach((image) => {
+      mapping[image.imageId] = image.name;
+    });
+    setGameNamesByKey(mapping);
   }, []);
 
   useEffect(() => {
@@ -207,23 +184,57 @@ function AppContent() {
 
     void refresh();
 
-    const handleFocus = () => {
-      void refresh();
-    };
-    const interval = window.setInterval(() => {
-      void refresh();
-    }, 60000);
-    window.addEventListener('focus', handleFocus);
-
     return () => {
       cancelled = true;
-      window.clearInterval(interval);
-      window.removeEventListener('focus', handleFocus);
     };
   }, [loadCatalogMetadata]);
 
+  // Lazily load log prompt rules for each LinuxGSM game type currently installed.
+  // Avoids bulk-fetching the entire catalog at startup — only fetches metadata for
+  // games that are actually present, and only once per game key per session.
+  const lgsmGameTypesKey = gameServers
+    .filter((s) => s.provider === 'linuxgsm')
+    .map((s) => s.game)
+    .filter(Boolean)
+    .sort()
+    .join(',');
+
   useEffect(() => {
-    if (!authReady || !isAuthenticated) {
+    if (!lgsmGameTypesKey) return;
+    const keys = lgsmGameTypesKey.split(',');
+    const newKeys = keys.filter((key) => !loadedLgsmGameKeysRef.current.has(key));
+    if (newKeys.length === 0) return;
+
+    newKeys.forEach((key) => loadedLgsmGameKeysRef.current.add(key));
+
+    void Promise.all(newKeys.map((key) => apiClient.getCatalogGame(key))).then((results) => {
+      const newRules: LogPromptRule[] = [];
+      results.forEach((game, i) => {
+        if (!game || !Array.isArray(game.logPrompts)) return;
+        const gameKey = newKeys[i];
+        game.logPrompts.forEach((prompt: any) => {
+          if (prompt.match && prompt.action) {
+            newRules.push({
+              gameKeys: [gameKey],
+              gameName: game.gamename || gameKey,
+              title: prompt.title || 'Action required',
+              match: prompt.match,
+              action: prompt.action,
+            });
+          }
+        });
+      });
+      if (newRules.length > 0) {
+        setLogPromptRules((prev) => [...prev, ...newRules]);
+      }
+    });
+  }, [lgsmGameTypesKey]);
+
+  useEffect(() => {
+    // Per-server metrics are only rendered on the game-servers view (table + metric
+    // modal). Subscribe only while that tab is active and tear down otherwise, so other
+    // views don't keep a fleet-wide metrics stream (and backend poller load) alive.
+    if (!authReady || !isAuthenticated || activeTab !== 'game-servers') {
       subscribedMetricsServerIdsRef.current.forEach((serverId) => {
         apiClient.unsubscribeMetrics(serverId);
       });
@@ -249,61 +260,42 @@ function AppContent() {
     });
 
     subscribedMetricsServerIdsRef.current = nextServerIds;
-  }, [authReady, isAuthenticated, metricsServerIdsKey]);
+  }, [authReady, isAuthenticated, activeTab, metricsServerIdsKey]);
 
+  // When a server flips to "running" with an open console tab, re-subscribe to logs
+  // ONLY if its container actually changed since we subscribed. The stream opened
+  // when the console was first shown already follows the same container, so a plain
+  // status flip needs no action — re-subscribing would make the backend resend the
+  // full history and replay the backlog on a fresh stream, duplicating every line
+  // already on screen.
+  const prevServerStatusesRef = useRef<Record<string, string>>({});
+  const openConsoleTabsRef = useRef(openConsoleTabs);
+  useEffect(() => { openConsoleTabsRef.current = openConsoleTabs; }, [openConsoleTabs]);
   useEffect(() => {
-    if (!authReady || !isAuthenticated) {
-      subscribedConsoleStatusServerIdsRef.current.forEach((serverId) => {
-        apiClient.unsubscribeConsoleStatus(serverId);
-      });
-      subscribedConsoleStatusServerIdsRef.current.clear();
-      return;
-    }
-
-    const nextServerIds = new Set(gameServers.map((server) => String(server.id)));
-
-    setConsoleReadyByServer((prev) => {
-      const next: Record<string, boolean | null> = {};
-
-      Object.keys(prev).forEach((id) => {
-        if (nextServerIds.has(id)) {
-          next[id] = prev[id];
-        }
-      });
-
-      gameServers.forEach((server) => {
-        const id = String(server.id);
-        if (!(id in next)) {
-          next[id] = null;
-        }
-      });
-
-      return next;
-    });
-    const nextReadyRef: Record<string, boolean | null> = {};
-    const nextConsoleSubscriptionIds = new Set<number>();
     gameServers.forEach((server) => {
-      const id = Number(server.id);
-      if (!Number.isFinite(id) || id <= 0) return;
-      const strId = String(id);
-
-      nextReadyRef[strId] = consoleReadyRef.current[strId] ?? null;
-      nextConsoleSubscriptionIds.add(id);
-
-      if (!subscribedConsoleStatusServerIdsRef.current.has(id)) {
-        apiClient.subscribeConsoleStatus(id);
+      const serverId = String(server.id);
+      const prevStatus = prevServerStatusesRef.current[serverId];
+      const currentStatus = server.status;
+      if (
+        prevStatus !== undefined &&
+        prevStatus !== 'running' &&
+        currentStatus === 'running' &&
+        openConsoleTabsRef.current.includes(serverId)
+      ) {
+        const subscribedContainerId = subscribedLogsContainerIdRef.current[serverId] ?? null;
+        const currentContainerId = server.dockerContainerId ?? null;
+        if (subscribedContainerId !== currentContainerId) {
+          suppressReplayAfterClearRef.current[serverId] = false;
+          subscribedLogsContainerIdRef.current[serverId] = currentContainerId;
+          apiClient.unsubscribeLogs(Number(server.id));
+          apiClient.subscribeLogs(Number(server.id), SERVER_LOG_HISTORY_LIMIT);
+        }
       }
     });
-
-    subscribedConsoleStatusServerIdsRef.current.forEach((id) => {
-      if (!nextConsoleSubscriptionIds.has(id)) {
-        apiClient.unsubscribeConsoleStatus(id);
-      }
-    });
-    subscribedConsoleStatusServerIdsRef.current = nextConsoleSubscriptionIds;
-
-    consoleReadyRef.current = nextReadyRef;
-  }, [authReady, isAuthenticated, metricsServerIdsKey]);
+    const next: Record<string, string> = {};
+    gameServers.forEach((s) => { next[String(s.id)] = s.status; });
+    prevServerStatusesRef.current = next;
+  }, [gameServers]);  
 
   const resolveServerName = (serverId: number | string, fallback?: string): string => {
     if (fallback) return fallback;
@@ -324,15 +316,9 @@ function AppContent() {
     (serverId: number) => {
       const serverIdString = String(serverId);
 
+      subscribedLogsContainerIdRef.current[serverIdString] =
+        serversRef.current.find((s) => s.id === serverIdString)?.dockerContainerId ?? null;
       apiClient.subscribeLogs(serverId, SERVER_LOG_HISTORY_LIMIT);
-
-      if (!(serverIdString in consoleReadyRef.current)) {
-        consoleReadyRef.current[serverIdString] = null;
-        setConsoleReadyByServer((prev) => ({
-          ...prev,
-          [serverIdString]: null,
-        }));
-      }
 
       setActiveConsoleTab(serverIdString);
       setOpenConsoleTabs((prev) =>
@@ -345,10 +331,10 @@ function AppContent() {
 
   const openServerConsole = useCallback(
     (serverId: number) => {
-      if (!canAccessServer(serverId, 'server.logs.read')) {
+      if (!canAccessServer(serverId, 'container.logs.read')) {
         addCLIMessage(
           'error',
-          'Permission denied: server.logs.read is required.',
+          "You don't have permission to view this server's logs",
           resolveServerName(serverId),
           'console'
         );
@@ -368,17 +354,18 @@ function AppContent() {
   );
 
   const openConsoleTerminal = (serverId: number, serverName?: string) => {
-    if (!canAccessServer(serverId, 'server.console')) {
+    if (!canAccessServer(serverId, 'server.command.send')) {
       addCLIMessage(
         'error',
-        'Permission denied: server.console is required.',
+        "You don't have permission to send commands to this server",
         resolveServerName(serverId, serverName),
         'console-terminal'
       );
       return;
     }
     const name = resolveServerName(serverId, serverName);
-    setConsoleTerminalTarget({ serverId, serverName: name });
+    const provider = gameServers.find((s) => Number(s.id) === serverId)?.provider ?? '';
+    setConsoleTerminalTarget({ serverId, serverName: name, provider });
   };
 
   useInstallAutoOpenLogs(installServerId, installStatus, openInstallLogs);
@@ -391,9 +378,7 @@ function AppContent() {
         apiClient.unsubscribeActions(numericServerId);
         apiClient.unsubscribeMetrics(numericServerId);
         apiClient.unsubscribeInstall(numericServerId);
-        apiClient.unsubscribeConsoleStatus(numericServerId);
         subscribedMetricsServerIdsRef.current.delete(numericServerId);
-        subscribedConsoleStatusServerIdsRef.current.delete(numericServerId);
       }
 
       setGameServers((prev) => prev.filter((server) => server.id !== serverId));
@@ -415,14 +400,8 @@ function AppContent() {
         delete next[serverId];
         return next;
       });
-      setConsoleReadyByServer((prev) => {
-        if (!(serverId in prev)) return prev;
-        const next = { ...prev };
-        delete next[serverId];
-        return next;
-      });
-      delete consoleReadyRef.current[serverId];
       delete suppressReplayAfterClearRef.current[serverId];
+      delete subscribedLogsContainerIdRef.current[serverId];
       clearRecentLogPromptMatchesForServer(serverId);
       setOpenConsoleTabs((prev) => prev.filter((id) => id !== serverId));
       setActiveConsoleTab((prev) => (prev === serverId ? 'cli-console' : prev));
@@ -433,41 +412,64 @@ function AppContent() {
   );
 
   const normalizeRealtimeServer = useCallback((server: any, existing?: GameServer): GameServer => {
-    const parsedPorts = extractServerPorts(server?.port_mappings_json, server?.port_labels_json);
-    const hasParsedPorts = parsedPorts.primary !== null || parsedPorts.portMappings.tcp.length > 0;
-    const primaryPort = hasParsedPorts ? parsedPorts.primary : (existing?.port ?? null);
-    const portMappings = hasParsedPorts
-      ? parsedPorts.portMappings
-      : (existing?.portMappings ?? { tcp: [], udp: [] });
-    const portLabels = hasParsedPorts
-      ? parsedPorts.portLabels
-      : (existing?.portLabels ?? { tcp: {}, udp: {} });
-    const rawSftpUsername = server?.sftp_username;
-    const rawSftpEnabled = server?.sftp_enabled;
-    const sftpUsername =
-      rawSftpUsername === null || rawSftpUsername === undefined
-        ? (existing?.sftpUsername ?? null)
-        : String(rawSftpUsername);
-    const sftpEnabled =
-      typeof rawSftpEnabled === 'number'
-        ? rawSftpEnabled === 1
-        : typeof rawSftpEnabled === 'boolean'
-          ? rawSftpEnabled
-          : (existing?.sftpEnabled ?? false);
+    let portsData: {
+      tcp: Array<{ host: number; container: number; label: string }>;
+      udp: Array<{ host: number; container: number; label: string }>;
+    } | null = null;
+    try {
+      const raw = server?.ports;
+      portsData = typeof raw === 'string' ? JSON.parse(raw) : (raw ?? null);
+    } catch {}
+
+    let primary: number | null = null;
+    let portMappings: { tcp: number[]; udp: number[] } = existing?.portMappings ?? { tcp: [], udp: [] };
+    let portLabels: { tcp: Record<string, string>; udp: Record<string, string> } =
+      existing?.portLabels ?? { tcp: {}, udp: {} };
+
+    if (portsData) {
+      const tcpEntries = Array.isArray(portsData.tcp) ? portsData.tcp : [];
+      const udpEntries = Array.isArray(portsData.udp) ? portsData.udp : [];
+      portMappings = {
+        tcp: tcpEntries.map((e) => e.host).filter((h) => Number.isFinite(h) && h > 0),
+        udp: udpEntries.map((e) => e.host).filter((h) => Number.isFinite(h) && h > 0),
+      };
+      portLabels = {
+        tcp: Object.fromEntries(
+          tcpEntries.filter((e) => e.host && e.label).map((e) => [String(e.host), e.label])
+        ),
+        udp: Object.fromEntries(
+          udpEntries.filter((e) => e.host && e.label).map((e) => [String(e.host), e.label])
+        ),
+      };
+      const isGame = (label: string) => label.toLowerCase().includes('game');
+      primary =
+        portMappings.tcp.find((p) => isGame(portLabels.tcp[String(p)] ?? '')) ??
+        portMappings.udp.find((p) => isGame(portLabels.udp[String(p)] ?? '')) ??
+        portMappings.tcp[0] ??
+        portMappings.udp[0] ??
+        null;
+    } else {
+      primary = existing?.port ?? null;
+    }
 
     return {
       id: String(server.id),
       name: server.name,
-      game: server.game_key,
-      port: primaryPort ?? undefined,
+      game: server.catalogId ?? (server.provider === 'external' ? server.dockerImage : null) ?? server.provider ?? '',
+      provider: server.provider,
+      catalogId: server.catalogId,
+      port: primary ?? undefined,
       portMappings,
       portLabels,
       status: mapBackendStatusToUi(server.status),
-      dockerContainerId: server.docker_container_id ?? null,
-      installStatus: server.install_progress?.status ?? null,
-      installProgress: server.install_progress?.progress_percent ?? null,
-      sftpUsername,
-      sftpEnabled,
+      dockerContainerId: server.dockerContainerId ?? null,
+      installStatus: server.installProgress?.status ?? null,
+      installProgress: server.installProgress?.progress ?? null,
+      desiredState: server.desiredState,
+      containerStatus: server.containerStatus,
+      healthStatus: server.healthStatus,
+      lastError: server.lastError ?? null,
+      providerMetadataJson: server.providerMetadata ? JSON.stringify(server.providerMetadata) : null,
     };
   }, []);
 
@@ -500,15 +502,15 @@ function AppContent() {
 
   const handleLogout = () => {
     apiClient.logout();
+    clearAppCache();
     resetSession();
     setMobileMenuOpen(false);
     setGameServers([]);
     setServerLogs({});
     setServerHistoryById({});
     setServerMetricsHistoryById({});
-    setConsoleReadyByServer({});
-    consoleReadyRef.current = {};
     suppressReplayAfterClearRef.current = {};
+    subscribedLogsContainerIdRef.current = {};
     setOpenConsoleTabs([]);
     setActiveConsoleTab('cli-console');
     setConsoleTerminalTarget(null);
@@ -519,9 +521,22 @@ function AppContent() {
     setInstallStatus(null);
     setInstallError(null);
     setInstalling(false);
+    setInstallPlan([]);
     subscribedMetricsServerIdsRef.current.clear();
-    subscribedConsoleStatusServerIdsRef.current.clear();
   };
+
+  // Keep a stable reference to the latest logout logic so the 401 handler below can
+  // call it without re-registering on every render.
+  handleLogoutRef.current = handleLogout;
+
+  // On a 401 (session expired/revoked) the API client clears the token; reset the
+  // SPA to the login screen in place instead of forcing a full page reload.
+  useEffect(() => {
+    apiClient.setUnauthorizedHandler(() => {
+      handleLogoutRef.current();
+    });
+    return () => apiClient.setUnauthorizedHandler(null);
+  }, []);
 
   const handleRequestLogout = () => {
     setLogoutConfirmOpen(true);
@@ -560,31 +575,11 @@ function AppContent() {
     setInstallServerId,
     setInstallProgressPercent,
     setInstallStatus,
+    setInstallPlan,
     refreshInstallPermissions,
   });
 
-  const handleInstallGame = async (
-    gameKey: string,
-    serverName: string,
-    gameServerName: string,
-    ports?: any,
-    portLabels?: { tcp?: Record<string, string>; udp?: Record<string, string> },
-    healthcheck?: { type: string; port?: number; name?: string },
-    requireSteamCredentials?: boolean,
-    steamUsername?: string,
-    steamPassword?: string
-  ) => {
-    const payload: InstallGameHandlerPayload = {
-      gameKey,
-      serverName,
-      gameServerName,
-      ports,
-      portLabels,
-      healthcheck,
-      requireSteamCredentials,
-      steamUsername,
-      steamPassword,
-    };
+  const handleInstallGame = async (payload: InstallGameHandlerPayload) => {
     await installGame(payload);
   };
 
@@ -599,8 +594,6 @@ function AppContent() {
     setOpenConsoleTabs,
     setActiveConsoleTab,
     openServerConsole,
-    setConsoleReadyByServer,
-    consoleReadyRef,
     serverLogHistoryLimit: SERVER_LOG_HISTORY_LIMIT,
   });
 
@@ -653,8 +646,6 @@ function AppContent() {
     suppressReplayAfterClearRef,
     replaceServerLogs,
     handleAddLog,
-    consoleReadyRef,
-    setConsoleReadyByServer,
     normalizeRealtimeServer,
     removeServerFromUi,
     setInstallServerId,
@@ -662,6 +653,8 @@ function AppContent() {
     setInstallStatus,
     setInstallError,
     setInstalling,
+    setInstallInteraction,
+    setInstallPlan,
     lastInstallProgressLogRef,
     refreshInstallPermissions,
     addCLIMessage,
@@ -683,6 +676,7 @@ function AppContent() {
 
     handleClearServerLogs(serverId);
     delete suppressReplayAfterClearRef.current[serverId];
+    delete subscribedLogsContainerIdRef.current[serverId];
     setActiveConsoleTab((prev) => (prev === serverId ? 'cli-console' : prev));
     setOpenConsoleTabs((prev) => prev.filter((id) => id !== serverId));
     setConsoleTerminalTarget((prev) => (prev?.serverId === Number(serverId) ? null : prev));
@@ -739,7 +733,6 @@ function AppContent() {
       serverMetricsHistoryById={serverMetricsHistoryById}
       serverHistoryById={serverHistoryById}
       gameNamesByKey={gameNamesByKey}
-      consoleReadyByServer={consoleReadyByServer}
       serverPermissionsById={serverPermissionsById}
       handleDeleteServer={handleDeleteServer}
       handleServerAction={handleServerAction}
@@ -757,6 +750,9 @@ function AppContent() {
       installProgressPercent={installProgressPercent}
       installStatus={installStatus}
       installServerId={installServerId}
+      installInteraction={installInteraction}
+      setInstallInteraction={setInstallInteraction}
+      installPlan={installPlan}
       installPermissionsSyncing={installPermissionsSyncing}
       usedInstallPorts={usedInstallPorts}
       handleClearInstallError={handleClearInstallError}

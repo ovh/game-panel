@@ -1,6 +1,7 @@
 import type { Dispatch, MouseEvent, SetStateAction } from 'react';
 import { apiClient } from '../../utils/api';
 import { isSymlinkEntry, joinPath, splitFilePath } from './utils';
+import type { SettingsTab } from './access';
 
 export interface FileItem {
   name: string;
@@ -12,6 +13,7 @@ export interface FileItem {
 interface CreateFileManagerHandlersDeps {
   renamingFile: string | null;
   currentPath: string;
+  currentRoot: string;
   serverId?: number | null;
   selectedFile: FileItem | null;
   fileContent: string;
@@ -21,6 +23,8 @@ interface CreateFileManagerHandlersDeps {
   createEntryName: string;
   renameValue: string;
   deleteEntryTarget: FileItem | null;
+  selectedItems: string[];
+  deleteMultiNames: string[] | null;
   loadFiles: (path: string) => Promise<void>;
   getFileMutationErrorMessage: (action: string, error: any) => Promise<string>;
   setCurrentPath: Dispatch<SetStateAction<string>>;
@@ -32,7 +36,7 @@ interface CreateFileManagerHandlersDeps {
   setSavingFile: Dispatch<SetStateAction<boolean>>;
   setFilesError: Dispatch<SetStateAction<string | null>>;
   setPendingFilePath: Dispatch<SetStateAction<string | null>>;
-  setActiveTab: Dispatch<SetStateAction<'filemanager' | 'backup' | 'sftp' | 'gameconfig' | 'terminal'>>;
+  setActiveTab: Dispatch<SetStateAction<SettingsTab>>;
   setRenamingFile: Dispatch<SetStateAction<string | null>>;
   setRenameValue: Dispatch<SetStateAction<string>>;
   setDeleteEntryTarget: Dispatch<SetStateAction<FileItem | null>>;
@@ -43,12 +47,15 @@ interface CreateFileManagerHandlersDeps {
   setCreateEntryError: Dispatch<SetStateAction<string | null>>;
   setShowCreateEntryModal: Dispatch<SetStateAction<boolean>>;
   setCreateEntryLoading: Dispatch<SetStateAction<boolean>>;
+  setSelectedItems: Dispatch<SetStateAction<string[]>>;
+  setDeleteMultiNames: Dispatch<SetStateAction<string[] | null>>;
 }
 
 export const createFileManagerHandlers = (deps: CreateFileManagerHandlersDeps) => {
   const {
     renamingFile,
     currentPath,
+    currentRoot,
     serverId,
     selectedFile,
     fileContent,
@@ -58,6 +65,8 @@ export const createFileManagerHandlers = (deps: CreateFileManagerHandlersDeps) =
     createEntryName,
     renameValue,
     deleteEntryTarget,
+    selectedItems,
+    deleteMultiNames,
     loadFiles,
     getFileMutationErrorMessage,
     setCurrentPath,
@@ -80,9 +89,20 @@ export const createFileManagerHandlers = (deps: CreateFileManagerHandlersDeps) =
     setCreateEntryError,
     setShowCreateEntryModal,
     setCreateEntryLoading,
+    setSelectedItems,
+    setDeleteMultiNames,
   } = deps;
 
-  const handleFileClick = async (file: FileItem) => {
+  // Checkbox click: toggle selection only (never navigates)
+  const handleFileClick = (file: FileItem) => {
+    if (renamingFile || file.name === '..') return;
+    setSelectedItems((prev) =>
+      prev.includes(file.name) ? prev.filter((n) => n !== file.name) : [...prev, file.name]
+    );
+  };
+
+  // Double click: navigate into folder or open file in editor
+  const handleFileDoubleClick = async (file: FileItem) => {
     if (renamingFile) return;
 
     if (file.type === 'folder') {
@@ -112,13 +132,43 @@ export const createFileManagerHandlers = (deps: CreateFileManagerHandlersDeps) =
       setFileLoading(true);
       try {
         const filePath = joinPath(currentPath, file.name);
-        const content = await apiClient.readServerFile(serverId, filePath);
+        const content = await apiClient.readServerFile(serverId, filePath, currentRoot);
         setFileContent(content ?? '');
       } catch (error: any) {
         setFileError(error?.response?.data?.error || error?.message || 'Failed to load file');
       } finally {
         setFileLoading(false);
       }
+    }
+  };
+
+  const handleDeleteSelected = () => {
+    if (!canWriteFiles || selectedItems.length === 0) return;
+    setDeleteMultiNames([...selectedItems]);
+    setShowDeleteEntryModal(true);
+  };
+
+  // Move one or more entries from the current directory into targetDir (a sibling/child folder or
+  // the parent). Backed by the rename route, which uses fs.rename and moves whole subtrees.
+  const handleMoveEntries = async (names: string[], targetDir: string) => {
+    if (!canWriteFiles || !serverId) return;
+    const movable = names.filter((name) => name && name !== '..');
+    if (movable.length === 0) return;
+    setFilesError(null);
+    setFileError(null);
+    try {
+      for (const name of movable) {
+        const from = joinPath(currentPath, name);
+        const to = joinPath(targetDir, name);
+        if (from === to) continue;
+        await apiClient.renameServerPath(serverId, from, to, currentRoot);
+      }
+      await loadFiles(currentPath);
+      setSelectedItems((prev) => prev.filter((n) => !movable.includes(n)));
+    } catch (error: any) {
+      const message = await getFileMutationErrorMessage('move file or folder', error);
+      setFilesError(message);
+      setFileError(message);
     }
   };
 
@@ -130,7 +180,7 @@ export const createFileManagerHandlers = (deps: CreateFileManagerHandlersDeps) =
     setFilesError(null);
     try {
       const filePath = joinPath(currentPath, selectedFile.name);
-      await apiClient.updateServerFile(serverId, filePath, fileContent);
+      await apiClient.updateServerFile(serverId, filePath, fileContent, currentRoot);
       setIsFileDirty(false);
       await loadFiles(currentPath);
     } catch (error: any) {
@@ -178,11 +228,14 @@ export const createFileManagerHandlers = (deps: CreateFileManagerHandlersDeps) =
       try {
         const from = joinPath(currentPath, renamingFile);
         const to = joinPath(currentPath, renameValue.trim());
-        await apiClient.renameServerPath(serverId, from, to);
+        await apiClient.renameServerPath(serverId, from, to, currentRoot);
         await loadFiles(currentPath);
         if (selectedFile?.name === renamingFile) {
           setSelectedFile({ ...selectedFile, name: renameValue.trim() });
         }
+        setSelectedItems((prev) =>
+          prev.map((n) => (n === renamingFile ? renameValue.trim() : n))
+        );
       } catch (error: any) {
         const message = await getFileMutationErrorMessage('rename file or folder', error);
         setFilesError(message);
@@ -214,21 +267,35 @@ export const createFileManagerHandlers = (deps: CreateFileManagerHandlersDeps) =
 
   const confirmDeleteEntry = async () => {
     if (!canWriteFiles) return;
-    if (!serverId || !deleteEntryTarget) return;
+    if (!serverId) return;
     setDeleteEntryLoading(true);
     setFilesError(null);
     setFileError(null);
     try {
-      const path = joinPath(currentPath, deleteEntryTarget.name);
-      await apiClient.deleteServerPaths(serverId, [path]);
-      await loadFiles(currentPath);
-      if (selectedFile?.name === deleteEntryTarget.name) {
-        setSelectedFile(null);
-        setFileContent('');
-        setIsFileDirty(false);
+      if (deleteMultiNames && deleteMultiNames.length > 0) {
+        const paths = deleteMultiNames.map((name) => joinPath(currentPath, name));
+        await apiClient.deleteServerPaths(serverId, paths, currentRoot);
+        await loadFiles(currentPath);
+        if (selectedFile && deleteMultiNames.includes(selectedFile.name)) {
+          setSelectedFile(null);
+          setFileContent('');
+          setIsFileDirty(false);
+        }
+        setSelectedItems((prev) => prev.filter((n) => !deleteMultiNames.includes(n)));
+      } else if (deleteEntryTarget) {
+        const path = joinPath(currentPath, deleteEntryTarget.name);
+        await apiClient.deleteServerPaths(serverId, [path], currentRoot);
+        await loadFiles(currentPath);
+        if (selectedFile?.name === deleteEntryTarget.name) {
+          setSelectedFile(null);
+          setFileContent('');
+          setIsFileDirty(false);
+        }
+        setSelectedItems((prev) => prev.filter((n) => n !== deleteEntryTarget.name));
       }
       setShowDeleteEntryModal(false);
       setDeleteEntryTarget(null);
+      setDeleteMultiNames(null);
     } catch (error: any) {
       const message = await getFileMutationErrorMessage('delete file or folder', error);
       setFilesError(message);
@@ -272,9 +339,9 @@ export const createFileManagerHandlers = (deps: CreateFileManagerHandlersDeps) =
     setCreateEntryError(null);
     try {
       if (createEntryType === 'folder') {
-        await apiClient.createServerDirectory(serverId, currentPath, name);
+        await apiClient.createServerDirectory(serverId, currentPath, name, currentRoot);
       } else {
-        await apiClient.createServerFile(serverId, currentPath, name, '');
+        await apiClient.createServerFile(serverId, currentPath, name, '', currentRoot);
       }
       await loadFiles(currentPath);
       setShowCreateEntryModal(false);
@@ -298,7 +365,7 @@ export const createFileManagerHandlers = (deps: CreateFileManagerHandlersDeps) =
     }
     try {
       const filePath = joinPath(currentPath, selectedFile.name);
-      const { blob, filename } = await apiClient.downloadServerFile(serverId, filePath);
+      const { blob, filename } = await apiClient.downloadServerFile(serverId, filePath, currentRoot);
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
@@ -312,8 +379,58 @@ export const createFileManagerHandlers = (deps: CreateFileManagerHandlersDeps) =
     }
   };
 
+  const handleDownloadPath = async (file: FileItem, event: MouseEvent) => {
+    event.stopPropagation();
+    if (!serverId) return;
+    if (isSymlinkEntry(file)) {
+      setFilesError('Symbolic links cannot be downloaded from the panel.');
+      return;
+    }
+    try {
+      const path = joinPath(currentPath, file.name);
+      const { blob, filename } = await apiClient.downloadServerPath(serverId, path, currentRoot);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename || file.name;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (error: any) {
+      setFilesError(error?.response?.data?.error || error?.message || 'Failed to download');
+    }
+  };
+
+  const handleDownloadSelected = async () => {
+    if (!serverId || selectedItems.length === 0) return;
+    for (let i = 0; i < selectedItems.length; i++) {
+      const name = selectedItems[i];
+      try {
+        const path = joinPath(currentPath, name);
+        const { blob, filename } = await apiClient.downloadServerPath(serverId, path, currentRoot);
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename || name;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+        if (i < selectedItems.length - 1) {
+          await new Promise<void>((resolve) => setTimeout(resolve, 400));
+        }
+      } catch {
+        // continue with remaining items
+      }
+    }
+  };
+
   return {
     handleFileClick,
+    handleFileDoubleClick,
+    handleDeleteSelected,
+    handleMoveEntries,
     handleSaveFile,
     handleOpenFileManagerAtPath,
     handleRenameFile,
@@ -325,5 +442,7 @@ export const createFileManagerHandlers = (deps: CreateFileManagerHandlersDeps) =
     handleCreateFile,
     submitCreateEntry,
     handleDownloadFile,
+    handleDownloadPath,
+    handleDownloadSelected,
   };
 };

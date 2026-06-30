@@ -1,9 +1,9 @@
-import { Terminal, Trash2, X, Copy, ArrowDown } from 'lucide-react';
-import { useState, useRef, useEffect, useLayoutEffect } from 'react';
+import { Terminal, Trash2, X, Copy, ArrowDown, CornerDownLeft } from 'lucide-react';
+import { memo, useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react';
+import { AppButton, AppToggle } from '../src/ui/components';
 import { ansiToHtml, stripAnsi } from '../utils/ansi';
 import type { GameServer } from '../types/gameServer';
 import type { CLIMessage } from '../types/cli';
-import { Switch } from './ui/switch';
 
 interface LogEntry {
   id: number;
@@ -16,32 +16,55 @@ interface ServerLogs {
   [serverId: string]: LogEntry[];
 }
 
+// Renders one ANSI log/console line. Memoized so ansiToHtml runs once per
+// (message, className) instead of on every parent re-render — the console re-renders
+// on every new log line, and without this each render re-converted every visible line.
+// Safe: ansiToHtml uses escapeXML:true to sanitize HTML entities before injection.
+const AnsiLine = memo(function AnsiLine({
+  className,
+  message,
+}: {
+  className: string;
+  message: string;
+}) {
+  const __html = useMemo(() => ansiToHtml(message), [message]);
+  return <pre className={className} dangerouslySetInnerHTML={{ __html }} />;
+});
+
 interface ServerConsoleTabsProps {
   servers: GameServer[];
   logs: ServerLogs;
   cliMessages: CLIMessage[];
-  consoleReadyByServer?: Record<string, boolean | null>;
   onClearLogs: (serverId: string) => void;
   onClearCLI: () => void;
   activeTab: string | null;
   onSetActiveTab: (serverId: string) => void;
   onCloseTab: (serverId: string) => void;
-  openTabs: string[]; // Array of server IDs that have open console tabs
+  openTabs: string[];
+  canSendCommandByServer?: Record<string, boolean>;
+  onSendCommand?: (serverId: string, command: string) => Promise<void>;
 }
 
 export function ServerConsoleTabs({
   servers,
   logs,
   cliMessages,
-  consoleReadyByServer,
   onClearLogs,
   onClearCLI,
   activeTab,
   onSetActiveTab,
   onCloseTab,
   openTabs,
+  canSendCommandByServer,
+  onSendCommand,
 }: ServerConsoleTabsProps) {
-  const [isMinimized, setIsMinimized] = useState(false);
+  const [isMinimized] = useState(false);
+  const [commandValue, setCommandValue] = useState('');
+  const [commandSending, setCommandSending] = useState(false);
+  const [commandHistory, setCommandHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const [historyDraft, setHistoryDraft] = useState('');
+  const commandInputRef = useRef<HTMLInputElement>(null);
   const [autoScrollCli, setAutoScrollCli] = useState(true);
   const [autoScrollServer, setAutoScrollServer] = useState(true);
   const [pendingCliLogs, setPendingCliLogs] = useState(0);
@@ -120,7 +143,7 @@ export function ServerConsoleTabs({
 
     if (!element) return;
 
-    const nextScrollTop = scrollPositionsByTabRef.current[tabId] ?? 0;
+    const nextScrollTop = scrollPositionsByTabRef.current[tabId] ?? Infinity;
     scrollFlagRef.current = true;
 
     let restoreFrameId = 0;
@@ -300,11 +323,23 @@ export function ServerConsoleTabs({
     return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
   };
 
-  const cardBg = 'bg-[#111827]';
+  const cardBg = 'bg-gp-surface-card shadow-[0_4px_24px_rgba(2,6,23,0.55),0_1px_4px_rgba(2,6,23,0.3)]';
   const borderColor = 'border-gray-700';
-  const textPrimary = 'text-white';
   const textSecondary = 'text-gray-400';
-  const tabBg = 'bg-[#1f2937]';
+
+  const ACTION_LABELS: Record<string, string> = {
+    console: 'Logs',
+    'console-terminal': 'Terminal',
+    install: 'Install',
+    delete: 'Delete',
+    rename: 'Rename',
+    start: 'Start',
+    stop: 'Stop',
+    restart: 'Restart',
+    'start-all': 'Start all',
+    'stop-all': 'Stop all',
+  };
+  const tabBg = 'bg-gp-surface-elevated';
   const tabActiveBg = 'border-[var(--gp-primary-300)] bg-[var(--gp-primary-300)]';
   const tabActiveText = 'text-[#031126]';
   const tabHoverBg = 'hover:bg-gray-700';
@@ -342,6 +377,55 @@ export function ServerConsoleTabs({
     void handleCopyServerLogs();
   };
 
+  const handleSendCommand = async () => {
+    if (!activeTab || !commandValue.trim() || commandSending) return;
+    const cmd = commandValue.trim();
+    setCommandHistory((prev) => [cmd, ...prev].slice(0, 100));
+    setHistoryIndex(-1);
+    setHistoryDraft('');
+    setCommandValue('');
+    setCommandSending(true);
+    try {
+      await onSendCommand?.(activeTab, cmd);
+    } finally {
+      setCommandSending(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!commandSending) {
+      commandInputRef.current?.focus();
+    }
+  }, [commandSending]);
+
+  const handleCommandKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && !commandSending) {
+      void handleSendCommand();
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (commandHistory.length === 0) return;
+      const nextIndex = historyIndex + 1;
+      if (nextIndex >= commandHistory.length) return;
+      if (historyIndex === -1) setHistoryDraft(commandValue);
+      setHistoryIndex(nextIndex);
+      setCommandValue(commandHistory[nextIndex]);
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (historyIndex <= 0) {
+        setHistoryIndex(-1);
+        setCommandValue(historyDraft);
+        return;
+      }
+      const nextIndex = historyIndex - 1;
+      setHistoryIndex(nextIndex);
+      setCommandValue(commandHistory[nextIndex]);
+    }
+  };
+
   const handleClearActiveLogs = () => {
     if (isCLIConsoleActive) {
       onClearCLI();
@@ -353,9 +437,9 @@ export function ServerConsoleTabs({
   };
 
   return (
-    <div className={`${cardBg} rounded-lg border ${borderColor} shadow-lg overflow-hidden`}>
+    <div className={`gp-console-panel ${cardBg} rounded-lg border ${borderColor} shadow-lg overflow-hidden`}>
       <div
-        className={`flex min-h-[44px] items-stretch justify-between border-b ${borderColor} rounded-t-lg overflow-hidden bg-[#0b1220]`}
+        className={`flex min-h-[44px] items-stretch justify-between border-b ${borderColor} rounded-t-lg overflow-hidden bg-gp-surface-input`}
       >
         <div className="flex min-w-0 flex-1 items-stretch overflow-x-auto hide-scrollbar">
           <div
@@ -372,14 +456,14 @@ export function ServerConsoleTabs({
                 activeTab === 'cli-console' ? tabActiveText : 'text-[var(--gp-primary-300)]'
               }`}
             >
-              Gamepanel logs
+              Activity
             </span>
             {cliMessages && cliMessages.length > 0 && (
               <span
                 className={`ml-2 rounded-full px-2 py-0.5 text-xs font-bold ${
                   activeTab === 'cli-console'
                     ? 'bg-[#031126]/15 text-[#031126]'
-                    : 'bg-[#157EEA] text-white'
+                    : 'bg-[var(--gp-ods-accent-secondary)] text-white'
                 }`}
               >
                 {cliMessages.length}
@@ -405,6 +489,7 @@ export function ServerConsoleTabs({
                     <span className="text-sm font-medium whitespace-nowrap">{server.name}</span>
                   </div>
                   <button
+                    type="button"
                     onClick={(e) => {
                       e.stopPropagation();
                       onCloseTab(server.id);
@@ -412,7 +497,7 @@ export function ServerConsoleTabs({
                     aria-label={`Close ${server.name} tab`}
                     className={`ml-2 inline-flex h-7 w-7 items-center justify-center rounded-md transition-all ${
                       isActiveServerTab
-                        ? 'bg-transparent opacity-70 hover:bg-red-500/10 hover:text-red-400 hover:opacity-100'
+                        ? 'bg-transparent text-[#031126] opacity-60 hover:opacity-100 hover:bg-[#031126]/10'
                         : 'bg-transparent opacity-0 text-slate-400 group-hover:opacity-100 hover:bg-red-500/10 hover:text-red-400'
                     }`}
                   >
@@ -422,29 +507,32 @@ export function ServerConsoleTabs({
               );
             })}
         </div>
-        <div className="flex min-h-full self-stretch flex-shrink-0 items-center gap-2 bg-[#0b1220] px-4 py-0">
+        <div className="flex min-h-full self-stretch flex-shrink-0 items-center gap-1 sm:gap-2 bg-gp-surface-input px-2 sm:px-4 py-0">
           <div className="flex h-full items-center justify-center gap-2">
-            <span className={`text-xs ${textSecondary}`}>Date/Time</span>
-            <Switch
+            <span className={`hidden sm:inline text-xs ${textSecondary}`}>Date/Time</span>
+            <AppToggle
               checked={showTimestamps}
-              onCheckedChange={setShowTimestamps}
-              aria-label="Toggle timestamps"
+              onChange={setShowTimestamps}
+              ariaLabel="Toggle timestamps"
+              size="compact"
             />
           </div>
-          <button
+          <AppButton
+            tone="ghost"
             onClick={handleCopyActiveLogs}
-            className={`inline-flex h-8 items-center gap-2 px-3 rounded ${tabHoverBg} transition-colors ${textSecondary} hover:text-[var(--color-cyan-400)] text-sm`}
+            className={`inline-flex h-8 items-center gap-2 px-2 sm:px-3 rounded ${tabHoverBg} transition-colors ${textSecondary} hover:text-[var(--color-cyan-400)] text-sm`}
           >
             <Copy className="w-3 h-3" />
-            Copy
-          </button>
-          <button
+            <span className="hidden sm:inline">Copy</span>
+          </AppButton>
+          <AppButton
+            tone="ghost"
             onClick={handleClearActiveLogs}
-            className={`inline-flex h-8 items-center gap-2 px-3 rounded ${tabHoverBg} transition-colors ${textSecondary} hover:text-orange-400 text-sm`}
+            className={`inline-flex h-8 items-center gap-2 px-2 sm:px-3 rounded ${tabHoverBg} transition-colors ${textSecondary} hover:text-orange-400 text-sm`}
           >
             <Trash2 className="w-3 h-3" />
-            Clear
-          </button>
+            <span className="hidden sm:inline">Clear</span>
+          </AppButton>
         </div>
       </div>
 
@@ -452,11 +540,11 @@ export function ServerConsoleTabs({
         <div className="flex flex-col h-[400px] min-h-0">
           {isCLIConsoleActive && (
             <>
-              <div className="relative flex-1 min-h-0">
+              <div className="gp-console-terminal-wrapper relative flex-1 min-h-0">
                 <div
                   ref={cliContainerRef}
                   onScroll={handleCliScroll}
-                  className={`h-full ${terminalBg} p-2 overflow-y-auto hide-scrollbar`}
+                  className={`gp-console-terminal h-full ${terminalBg} p-2 overflow-y-auto hide-scrollbar`}
                 >
                   {!cliMessages || cliMessages.length === 0 ? (
                     <div className="text-gray-500 text-center py-8">
@@ -480,17 +568,17 @@ export function ServerConsoleTabs({
                                     {msg.server}
                                   </span>
                                 )}
-                                {msg.server && msg.action && (
-                                  <span className="text-gray-600">-&gt;</span>
-                                )}
-                                {msg.action && (
-                                  <span className="uppercase tracking-wider text-gray-400">
-                                    {msg.action}
-                                  </span>
+                                {msg.action && ACTION_LABELS[msg.action] && (
+                                  <>
+                                    {msg.server && <span className="text-gray-600">-&gt;</span>}
+                                    <span className="tracking-wide text-gray-400">
+                                      {ACTION_LABELS[msg.action]}
+                                    </span>
+                                  </>
                                 )}
                               </div>
                             )}
-                            <pre
+                            <AnsiLine
                               className={`font-mono text-sm leading-5 whitespace-pre-wrap ${
                                 msg.type === 'error'
                                   ? 'text-red-400'
@@ -500,7 +588,7 @@ export function ServerConsoleTabs({
                                       ? 'text-green-400'
                                       : 'text-gray-300'
                               }`}
-                              dangerouslySetInnerHTML={{ __html: ansiToHtml(msg.message) }}
+                              message={msg.message}
                             />
                           </div>
                         </div>
@@ -510,13 +598,14 @@ export function ServerConsoleTabs({
                 </div>
 
                 {!autoScrollCli && pendingCliLogs > 0 && (
-                  <button
+                  <AppButton
+                    tone="ghost"
                     onClick={scrollCliToBottom}
-                    className="absolute bottom-4 right-4 inline-flex items-center gap-2 rounded-lg border border-[var(--color-cyan-400)]/60 bg-[#0b2f35]/95 px-3 py-2 text-sm font-semibold text-[var(--color-cyan-400)] shadow-lg transition-colors hover:bg-[#104049]"
+                    className="absolute bottom-4 right-4 inline-flex items-center gap-2 rounded-lg border border-[var(--color-cyan-400)]/60 bg-[var(--gp-console-scroll-bg,#0b2f35)]/95 px-3 py-2 text-sm font-semibold text-[var(--color-cyan-400)] shadow-lg transition-colors hover:bg-[var(--gp-console-scroll-hover,#104049)]"
                   >
                     <ArrowDown className="h-4 w-4" />
                     {pendingCliLogs} new log{pendingCliLogs > 1 ? 's' : ''}
-                  </button>
+                  </AppButton>
                 )}
               </div>
             </>
@@ -524,11 +613,11 @@ export function ServerConsoleTabs({
 
           {!isCLIConsoleActive && activeServer && (
             <>
-              <div className="relative flex-1 min-h-0">
+              <div className="gp-console-terminal-wrapper relative flex-1 min-h-0">
                 <div
                   ref={serverContainerRef}
                   onScroll={handleServerScroll}
-                  className={`h-full ${terminalBg} p-2 overflow-y-auto overflow-x-auto hide-scrollbar font-mono text-sm`}
+                  className={`gp-console-terminal h-full ${terminalBg} p-2 overflow-y-auto overflow-x-auto hide-scrollbar font-mono text-sm`}
                 >
                   {activeLogs.length === 0 ? (
                     <div className="py-8 text-center text-gray-500">
@@ -546,9 +635,9 @@ export function ServerConsoleTabs({
                             [{formatLogDateTime(log.timestamp)}]
                           </span>
                         )}
-                        <pre
+                        <AnsiLine
                           className={`m-0 inline-block min-w-max flex-none whitespace-pre font-mono text-sm ${getLogColor(log.type)}`}
-                          dangerouslySetInnerHTML={{ __html: ansiToHtml(log.message) }}
+                          message={log.message}
                         />
                       </div>
                     ))
@@ -556,30 +645,58 @@ export function ServerConsoleTabs({
                 </div>
 
                 {!autoScrollServer && pendingServerLogs > 0 && (
-                  <button
+                  <AppButton
+                    tone="ghost"
                     onClick={scrollServerToBottom}
-                    className="absolute bottom-4 right-4 inline-flex items-center gap-2 rounded-lg border border-[var(--color-cyan-400)]/60 bg-[#0b2f35]/95 px-3 py-2 text-sm font-semibold text-[var(--color-cyan-400)] shadow-lg transition-colors hover:bg-[#104049]"
+                    className="absolute bottom-4 right-4 inline-flex items-center gap-2 rounded-lg border border-[var(--color-cyan-400)]/60 bg-[var(--gp-console-scroll-bg,#0b2f35)]/95 px-3 py-2 text-sm font-semibold text-[var(--color-cyan-400)] shadow-lg transition-colors hover:bg-[var(--gp-console-scroll-hover,#104049)]"
                   >
                     <ArrowDown className="h-4 w-4" />
                     {pendingServerLogs} new log{pendingServerLogs > 1 ? 's' : ''}
-                  </button>
+                  </AppButton>
                 )}
               </div>
+              {(() => {
+                const canSend = canSendCommandByServer?.[activeServer.id] ?? false;
+                const isStopped = activeServer.status === 'stopped';
+                const isInputDisabled = commandSending || !canSend || isStopped;
+                const inputPlaceholder = isStopped
+                  ? 'The server is stopped. Start it to send commands.'
+                  : canSend
+                    ? 'Type a command and press Enter…'
+                    : 'No permission to send commands';
+                return (
+                  <div className={`shrink-0 flex items-center gap-2 border-t ${borderColor} bg-[#0d1117] px-4 py-2.5`}>
+                    <span className="shrink-0 select-none font-mono text-sm font-bold text-[var(--color-cyan-400)]">
+                      {commandSending ? '…' : '>'}
+                    </span>
+                    <input
+                      ref={commandInputRef}
+                      type="text"
+                      value={commandValue}
+                      onChange={(e) => {
+                        setCommandValue(e.target.value);
+                        if (historyIndex !== -1) setHistoryIndex(-1);
+                      }}
+                      onKeyDown={handleCommandKeyDown}
+                      disabled={isInputDisabled}
+                      placeholder={inputPlaceholder}
+                      style={{ color: isInputDisabled ? '#4b5563' : '#e2e8f0' }}
+                      className="flex-1 bg-transparent font-mono text-sm caret-[var(--color-cyan-400)] placeholder-gray-600 focus:outline-none disabled:cursor-not-allowed"
+                    />
+                    <button
+                      onClick={() => void handleSendCommand()}
+                      disabled={commandSending || !commandValue.trim() || !canSend}
+                      title="Send command (Enter)"
+                      className="shrink-0 rounded p-1.5 text-gray-600 transition-colors hover:bg-[var(--color-cyan-400)]/10 hover:text-[var(--color-cyan-400)] disabled:cursor-not-allowed disabled:opacity-30"
+                    >
+                      <CornerDownLeft className="h-4 w-4" />
+                    </button>
+                  </div>
+                );
+              })()}
             </>
           )}
 
-          <div
-            className={`flex items-center justify-end gap-2 border-t ${borderColor} bg-[#0b1220] px-3 py-2`}
-          >
-            <a
-              href="https://linuxgsm.com/"
-              target="_blank"
-              rel="noreferrer"
-              className="text-[10px] uppercase tracking-[0.2em] text-gray-400 transition-opacity hover:opacity-70"
-            >
-              Powered by LinuxGSM
-            </a>
-          </div>
         </div>
       )}
     </div>

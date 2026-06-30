@@ -1,4 +1,5 @@
 import { bus } from '../../realtime/bus.js';
+import type { InstallStatus } from '../../services/installPlan.js';
 import type { InstallationProgressRow } from '../../types/database.js';
 import { nowIso } from '../../utils/time.js';
 import { BaseRepository } from './base.js';
@@ -6,19 +7,32 @@ import { BaseRepository } from './base.js';
 export class InstallationProgressRepository extends BaseRepository {
   async create(serverId: number) {
     const db = await this.ensureDb();
-    const result = await db.run('INSERT INTO installation_progress (server_id) VALUES (?)', [serverId]);
+    const timestamp = nowIso();
+    const result = await db.run(
+      `INSERT INTO installation_progress (server_id, started_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?)`,
+      [serverId, timestamp, timestamp, timestamp]
+    );
     return result.lastID;
   }
 
-  async update(serverId: number, progress: number, status: string, errorMessage?: string) {
+  async update(serverId: number, progress: number, status: InstallStatus, errorMessage?: string) {
     const db = await this.ensureDb();
+    const timestamp = nowIso();
     await db.run(
-      'UPDATE installation_progress SET progress_percent = ?, status = ?, error_message = ?, completed_at = ? WHERE server_id = ?',
+      `UPDATE installation_progress
+       SET progress_percent = ?,
+           status = ?,
+           error_message = ?,
+           completed_at = ?,
+           updated_at = ?
+       WHERE server_id = ?`,
       [
         progress,
         status,
         errorMessage || null,
-        status === 'completed' || status === 'failed' ? nowIso() : null,
+        status === 'completed' || status === 'failed' ? timestamp : null,
+        timestamp,
         serverId,
       ]
     );
@@ -28,7 +42,7 @@ export class InstallationProgressRepository extends BaseRepository {
       progress,
       status,
       errorMessage: errorMessage || null,
-      timestamp: nowIso(),
+      timestamp,
     });
   }
 

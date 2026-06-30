@@ -3,7 +3,7 @@ import { systemMetricsRepository } from '../../database/index.js';
 import * as systemUtils from '../../utils/system.js';
 import type { AuthenticatedWebSocket } from '../types.js';
 import { sendSafe } from '../auth.js';
-import { round2 } from '../subscriptions.js';
+import { round2 } from '../../utils/number.js';
 import { logError } from '../../utils/logger.js';
 import { nowIso } from '../../utils/time.js';
 
@@ -46,11 +46,11 @@ export function startSystemMetricsPoller(wss: WebSocketServer, opts?: SystemMetr
                 metrics: {
                     cpuUsage: round2(stats.cpuUsage),
                     memoryUsage: round2(stats.memoryUsage),
-                    disk: stats.diskUsage,
+                    diskUsage: round2(stats.diskUsage),
                     network: stats.networkUsage,
                 },
                 timestamp: nowIso(),
-            };
+            } as const;
 
             // Broadcast only to subscribed clients
             wss.clients.forEach((client) => {

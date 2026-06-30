@@ -6,9 +6,10 @@ import { BaseRepository } from './base.js';
 export class ServerActionsRepository extends BaseRepository {
   async create(serverId: number, level: string, message: string, actorUsername: string) {
     const db = await this.ensureDb();
+    const timestamp = nowIso();
     const result = await db.run(
-      'INSERT INTO server_actions (server_id, level, message, actor_username) VALUES (?, ?, ?, ?)',
-      [serverId, level, message, actorUsername]
+      'INSERT INTO server_actions (server_id, timestamp, level, message, actor_username) VALUES (?, ?, ?, ?, ?)',
+      [serverId, timestamp, level, message, actorUsername]
     );
     const id = result.lastID as number;
 
@@ -34,7 +35,7 @@ export class ServerActionsRepository extends BaseRepository {
       message,
       actorUsername,
       actionId: id,
-      timestamp: nowIso(),
+      timestamp,
     });
 
     return id;

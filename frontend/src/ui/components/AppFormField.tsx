@@ -27,7 +27,7 @@ export function AppFormField({
 }: AppFormFieldProps) {
   return (
     <FormField className={cn('gp-app-form-field flex flex-col gap-2', className)} invalid={Boolean(error)} {...props}>
-      <FormFieldLabel>{required ? `${label} (Mandatory)` : label}</FormFieldLabel>
+      <FormFieldLabel>{label}</FormFieldLabel>
       {children}
       {helper ? <FormFieldHelper>{helper}</FormFieldHelper> : null}
       {error ? <FormFieldError>{error}</FormFieldError> : null}

@@ -9,21 +9,12 @@ function jwtSecret(): string {
   return getConfig().jwtSecret;
 }
 
-/**
- * Shape of the JWT payload used across the application.
- *
- * Notes:
- * - "isRoot" allows an early bypass in authz middleware.
- */
 export interface JWTPayload {
   userId: number;
   username: string;
   isRoot: boolean;
+  tokenVersion: number;
 }
-
-/* -------------------------------------------------------------------------- */
-/*                               Password utils                               */
-/* -------------------------------------------------------------------------- */
 
 export async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, BCRYPT_SALT_ROUNDS);
@@ -33,27 +24,23 @@ export async function comparePasswords(password: string, hash: string): Promise<
   return bcrypt.compare(password, hash);
 }
 
-/* -------------------------------------------------------------------------- */
-/*                                 JWT utils                                  */
-/* -------------------------------------------------------------------------- */
-
 export function generateToken(payload: JWTPayload): string {
-  return jwt.sign(payload, jwtSecret(), { expiresIn: TOKEN_EXPIRY });
+  return jwt.sign(payload, jwtSecret(), { expiresIn: TOKEN_EXPIRY, algorithm: 'HS256' });
 }
 
 export function verifyToken(token: string): JWTPayload {
-  const decoded = jwt.verify(token, jwtSecret());
+  const decoded = jwt.verify(token, jwtSecret(), { algorithms: ['HS256'] });
 
   if (typeof decoded !== 'object' || decoded === null) {
     throw new Error('Invalid token payload');
   }
 
-  // Very small runtime guard (helps when you deploy with old tokens still around)
   const d = decoded as Partial<JWTPayload>;
   if (
     typeof d.userId !== 'number' ||
     typeof d.username !== 'string' ||
-    typeof d.isRoot !== 'boolean'
+    typeof d.isRoot !== 'boolean' ||
+    typeof d.tokenVersion !== 'number'
   ) {
     throw new Error('Invalid token payload shape');
   }

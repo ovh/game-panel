@@ -3,7 +3,9 @@ import { type AuthenticatedRequest, authMiddleware, requireGlobalPermission } fr
 import { comparePasswords, generateToken, hashPassword } from '../utils/auth.js';
 import { userRepository, serverMemberRepository } from '../database/index.js';
 import { asNonEmptyString } from './users.js';
-import { logError } from '../utils/logger.js';
+import { sendRouteError } from '../utils/routeErrors.js';
+import { PERMISSIONS } from '../permissions.js';
+import { requireBodyObject } from '../utils/httpValidation.js';
 
 const router = Router();
 
@@ -26,7 +28,6 @@ function asStringArray(value: unknown): string[] | null {
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
 
-  // refuse mixed/invalid arrays
   if (arr.length !== value.length) return null;
   return arr;
 }
@@ -139,20 +140,19 @@ function clearLoginFailures(req: Request, identifier: string): void {
   clearLoginRate(loginRateByIp, getClientIp(req));
 }
 
-/**
- * Register a new user.
- */
+// POST /api/auth/register
 router.post(
   '/register',
   authMiddleware,
-  requireGlobalPermission('users.manage'),
+  requireGlobalPermission(PERMISSIONS.users.manage),
   async (req: Request, res: Response) => {
     try {
-      const username = asNonEmptyString(req.body?.username);
-      const password = asNonEmptyString(req.body?.password);
-      const confirmPassword = asNonEmptyString(req.body?.confirmPassword);
+      const body = requireBodyObject(req.body);
+      const username = asNonEmptyString(body.username);
+      const password = asNonEmptyString(body.password);
+      const confirmPassword = asNonEmptyString(body.confirmPassword);
 
-      const globalPermissionsRaw = (req.body as any)?.globalPermissions;
+      const globalPermissionsRaw = body.globalPermissions;
 
       let globalPermissions: string[] | undefined = undefined;
 
@@ -201,7 +201,7 @@ router.post(
 
       const user = await userRepository.findById(userId!);
       if (!user) {
-        return res.status(500).json({ error: 'Registration failed' });
+        throw new Error('Created user could not be loaded');
       }
 
       return res.status(201).json({
@@ -215,20 +215,20 @@ router.post(
         },
       });
     } catch (error) {
-      logError('ROUTE:AUTH:REGISTER', error);
-      return res.status(500).json({ error: 'Registration failed' });
+      return sendRouteError(res, error, {
+        route: 'ROUTE:AUTH:REGISTER',
+        fallbackMessage: 'Registration failed',
+      });
     }
   }
 );
 
-/**
- * Login with username + password.
- * Uses a generic error message to avoid leaking which part is invalid.
- */
+// POST /api/auth/login
 router.post('/login', async (req: Request, res: Response) => {
   try {
-    const identifier = asNonEmptyString(req.body?.username);
-    const password = asNonEmptyString(req.body?.password);
+    const body = requireBodyObject(req.body);
+    const identifier = asNonEmptyString(body.username);
+    const password = asNonEmptyString(body.password);
 
     if (!identifier || !password) {
       return res.status(400).json({ error: 'Username and password required' });
@@ -266,6 +266,7 @@ router.post('/login', async (req: Request, res: Response) => {
       userId: user.id,
       username: user.username,
       isRoot: Boolean(user.is_root),
+      tokenVersion: user.token_version,
     });
 
     return res.json({
@@ -279,14 +280,14 @@ router.post('/login', async (req: Request, res: Response) => {
       token,
     });
   } catch (error) {
-    logError('ROUTE:AUTH:LOGIN', error);
-    return res.status(500).json({ error: 'Login failed' });
+    return sendRouteError(res, error, {
+      route: 'ROUTE:AUTH:LOGIN',
+      fallbackMessage: 'Login failed',
+    });
   }
 });
 
-/**
- * Return the currently authenticated user.
- */
+// GET /api/auth/me
 router.get('/me', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.user!.userId;
@@ -302,7 +303,7 @@ router.get('/me', authMiddleware, async (req: AuthenticatedRequest, res: Respons
 
     const serverRows = await serverMemberRepository.listByUser(userId);
 
-    const serverPermissions = serverRows.map((r: any) => {
+    const serverPermissions = serverRows.map((r) => {
       let permissions: string[] = [];
       try {
         const parsed = JSON.parse(r.permissions_json ?? '[]');
@@ -330,19 +331,20 @@ router.get('/me', authMiddleware, async (req: AuthenticatedRequest, res: Respons
       },
     });
   } catch (error) {
-    logError('ROUTE:AUTH:ME', error);
-    return res.status(500).json({ error: 'Failed to fetch user' });
+    return sendRouteError(res, error, {
+      route: 'ROUTE:AUTH:ME',
+      fallbackMessage: 'Failed to fetch user',
+    });
   }
 });
 
-/**
- * Change the current user's password.
- */
+// POST /api/auth/change-password
 router.post('/change-password', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const currentPassword = asNonEmptyString(req.body?.currentPassword);
-    const newPassword = asNonEmptyString(req.body?.newPassword);
-    const confirmPassword = asNonEmptyString(req.body?.confirmPassword);
+    const body = requireBodyObject(req.body);
+    const currentPassword = asNonEmptyString(body.currentPassword);
+    const newPassword = asNonEmptyString(body.newPassword);
+    const confirmPassword = asNonEmptyString(body.confirmPassword);
 
     if (!currentPassword || !newPassword || !confirmPassword) {
       return res.status(400).json({ error: 'Missing required fields' });
@@ -373,10 +375,22 @@ router.post('/change-password', authMiddleware, async (req: AuthenticatedRequest
     const newPasswordHash = await hashPassword(newPassword);
     await userRepository.updatePassword(req.user!.userId, newPasswordHash);
 
-    return res.json({ success: true, message: 'Password changed successfully' });
+    const refreshed = await userRepository.findById(req.user!.userId);
+    const token = refreshed
+      ? generateToken({
+          userId: refreshed.id,
+          username: refreshed.username,
+          isRoot: Boolean(refreshed.is_root),
+          tokenVersion: refreshed.token_version,
+        })
+      : undefined;
+
+    return res.json({ success: true, message: 'Password changed successfully', token });
   } catch (error) {
-    logError('ROUTE:AUTH:CHANGE_PASSWORD', error);
-    return res.status(500).json({ error: 'Failed to change password' });
+    return sendRouteError(res, error, {
+      route: 'ROUTE:AUTH:CHANGE_PASSWORD',
+      fallbackMessage: 'Failed to change password',
+    });
   }
 });
 

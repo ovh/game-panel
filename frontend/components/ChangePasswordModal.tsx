@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { AlertCircle, KeyRound, Loader2 } from 'lucide-react';
+import { AlertCircle, Eye, EyeOff, KeyRound, Loader2 } from 'lucide-react';
 import { apiClient } from '../utils/api';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
 import { AppAlert, AppButton, AppFormField, AppInput } from '../src/ui/components';
@@ -16,6 +16,9 @@ export function ChangePasswordModal({ isOpen, onClose }: ChangePasswordModalProp
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showCurrent, setShowCurrent] = useState(false);
+  const [showNew, setShowNew] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   useEffect(() => {
     if (isOpen) return;
@@ -106,33 +109,51 @@ export function ChangePasswordModal({ isOpen, onClose }: ChangePasswordModalProp
             )}
 
             <AppFormField className="space-y-2" label="Current password" required>
-              <AppInput
-                type="password"
-                value={currentPassword}
-                onChange={(event) => setCurrentPassword(event.target.value)}
-                autoComplete="current-password"
-                className="w-full rounded-lg border border-gray-700 bg-[#1f2937] px-3 py-2 text-sm text-white focus:border-[var(--color-cyan-400)] focus:outline-none"
-              />
+              <div className="relative">
+                <AppInput
+                  type={showCurrent ? 'text' : 'password'}
+                  value={currentPassword}
+                  onChange={(event) => setCurrentPassword(event.target.value)}
+                  autoComplete="current-password"
+                  className="w-full rounded-lg border border-gray-700 bg-[#1f2937] px-3 py-2 pr-10 text-sm text-white focus:border-[var(--color-cyan-400)] focus:outline-none"
+                />
+                <button type="button" tabIndex={-1} onClick={() => setShowCurrent(s => !s)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-200 transition-colors">
+                  {showCurrent ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
             </AppFormField>
 
             <AppFormField className="space-y-2" label="New password" required>
-              <AppInput
-                type="password"
-                value={newPassword}
-                onChange={(event) => setNewPassword(event.target.value)}
-                autoComplete="new-password"
-                className="w-full rounded-lg border border-gray-700 bg-[#1f2937] px-3 py-2 text-sm text-white focus:border-[var(--color-cyan-400)] focus:outline-none"
-              />
+              <div className="relative">
+                <AppInput
+                  type={showNew ? 'text' : 'password'}
+                  value={newPassword}
+                  onChange={(event) => setNewPassword(event.target.value)}
+                  autoComplete="new-password"
+                  className="w-full rounded-lg border border-gray-700 bg-[#1f2937] px-3 py-2 pr-10 text-sm text-white focus:border-[var(--color-cyan-400)] focus:outline-none"
+                />
+                <button type="button" tabIndex={-1} onClick={() => setShowNew(s => !s)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-200 transition-colors">
+                  {showNew ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
             </AppFormField>
 
             <AppFormField className="space-y-2" label="Confirm new password" required>
-              <AppInput
-                type="password"
-                value={confirmPassword}
-                onChange={(event) => setConfirmPassword(event.target.value)}
-                autoComplete="new-password"
-                className="w-full rounded-lg border border-gray-700 bg-[#1f2937] px-3 py-2 text-sm text-white focus:border-[var(--color-cyan-400)] focus:outline-none"
-              />
+              <div className="relative">
+                <AppInput
+                  type={showConfirm ? 'text' : 'password'}
+                  value={confirmPassword}
+                  onChange={(event) => setConfirmPassword(event.target.value)}
+                  autoComplete="new-password"
+                  className="w-full rounded-lg border border-gray-700 bg-[#1f2937] px-3 py-2 pr-10 text-sm text-white focus:border-[var(--color-cyan-400)] focus:outline-none"
+                />
+                <button type="button" tabIndex={-1} onClick={() => setShowConfirm(s => !s)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-200 transition-colors">
+                  {showConfirm ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
             </AppFormField>
 
             <div className="flex items-center justify-end gap-2 border-t border-gray-800 pt-4">
@@ -146,8 +167,9 @@ export function ChangePasswordModal({ isOpen, onClose }: ChangePasswordModalProp
               </AppButton>
               <AppButton
                 type="submit"
+                tone="primary"
                 disabled={isSubmitting}
-                className="inline-flex items-center gap-2 rounded bg-[#0050D7] px-4 py-2 text-sm font-medium text-white hover:bg-[#157EEA] hover:text-white disabled:opacity-60"
+                className="inline-flex items-center gap-2 rounded px-4 py-2 text-sm font-medium disabled:opacity-60"
               >
                 {isSubmitting ? (
                   <Loader2 className="h-4 w-4 animate-spin" />

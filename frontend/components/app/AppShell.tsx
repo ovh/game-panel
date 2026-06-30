@@ -1,20 +1,27 @@
+import { lazy, Suspense, useRef } from 'react';
 import { Menu } from 'lucide-react';
+import { useTheme } from '../../contexts/ThemeContext';
+import { useFocusTrap } from '../../src/ui/utils/useFocusTrap';
 import { Sidebar } from '../Sidebar';
-import { HostStatus } from '../HostStatus';
 import { GameServersTable } from '../GameServersTable';
 import { NewsPanel } from '../NewsPanel';
 import { InstallGameServer } from '../InstallGameServer';
 import { Resources } from '../Resources';
 import { UserAdministration } from '../UserAdministration';
 import { ServerConsoleTabs } from '../ServerConsoleTabs';
-import { ServerConsoleTerminalModal } from '../ServerConsoleTerminalModal';
+import { apiClient } from '../../utils/api';
 import { LogPromptToasts } from '../LogPromptToasts';
 import { ConfirmationModal } from '../ConfirmationModal';
 import { ChangePasswordModal } from '../ChangePasswordModal';
 import { AppPageLayout } from '../../src/ui/layout';
+
+// Lazily loaded so recharts (charts library) is only fetched when the Host Status
+// page is opened, not on initial app load.
+const HostStatus = lazy(() => import('../HostStatus').then((m) => ({ default: m.HostStatus })));
 import type { CLIMessage } from '../../types/cli';
-import type { GameServer } from '../../types/gameServer';
+import type { GameServer, InstallInteraction, InstallStep } from '../../types/gameServer';
 import type { AuthUser } from '../../utils/permissions';
+import type { InstallGameHandlerPayload } from './appActionHandlers';
 import type {
   ServerHistoryById,
   ServerLogs,
@@ -37,7 +44,6 @@ interface AppShellProps {
   serverMetricsHistoryById: Record<string, ServerMetricHistoryPoint[]>;
   serverHistoryById: ServerHistoryById;
   gameNamesByKey: Record<string, string>;
-  consoleReadyByServer: Record<string, boolean | null>;
   serverPermissionsById: Record<string, string[]>;
   handleDeleteServer: (id: string) => Promise<void>;
   handleServerAction: (serverId: string, serverName: string, action: string) => Promise<void>;
@@ -49,12 +55,15 @@ interface AppShellProps {
   canInstallServers: boolean;
   installModalOpen: boolean;
   setInstallModalOpen: (open: boolean) => void;
-  handleInstallGame: (...args: any[]) => Promise<void>;
+  handleInstallGame: (payload: InstallGameHandlerPayload) => Promise<void>;
   installing: boolean;
   installError: string | null;
   installProgressPercent: number | null;
   installStatus: string | null;
   installServerId: number | null;
+  installInteraction: InstallInteraction | null;
+  setInstallInteraction: (v: InstallInteraction | null) => void;
+  installPlan: InstallStep[];
   installPermissionsSyncing: boolean;
   usedInstallPorts: { tcp: Set<number>; udp: Set<number> };
   handleClearInstallError: () => void;
@@ -93,11 +102,9 @@ export function AppShell({
   serverMetricsHistoryById,
   serverHistoryById,
   gameNamesByKey,
-  consoleReadyByServer,
   serverPermissionsById,
   handleDeleteServer,
   handleServerAction,
-  openConsoleTerminal,
   handleRenameServer,
   handleRefreshServerSnapshot,
   handleStartAll,
@@ -111,6 +118,9 @@ export function AppShell({
   installProgressPercent,
   installStatus,
   installServerId,
+  installInteraction,
+  setInstallInteraction,
+  installPlan,
   installPermissionsSyncing,
   usedInstallPorts,
   handleClearInstallError,
@@ -123,8 +133,6 @@ export function AppShell({
   setActiveConsoleTab,
   handleCloseConsoleTab,
   openConsoleTabs,
-  consoleTerminalTarget,
-  setConsoleTerminalTarget,
   activeLogPromptToasts,
   removeLogPromptToast,
   logoutConfirmOpen,
@@ -134,6 +142,22 @@ export function AppShell({
   setChangePasswordOpen,
   currentUserId,
 }: AppShellProps) {
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
+  const mobileNavRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(mobileMenuOpen, mobileNavRef, { onEscape: () => setMobileMenuOpen(false) });
+
+  const canSendCommandByServer: Record<string, boolean> = {};
+  for (const server of gameServers) {
+    const perms = serverPermissionsById[server.id] ?? [];
+    canSendCommandByServer[server.id] =
+      Boolean(currentUser?.isRoot) || perms.includes('*') || perms.includes('server.command.send');
+  }
+
+  const handleSendConsoleCommand = async (serverId: string, command: string) => {
+    await apiClient.sendConsoleCommand(Number(serverId), command);
+  };
+
   return (
     <div className="flex min-h-screen overflow-x-hidden bg-transparent">
       <div className="hidden md:block">
@@ -147,29 +171,46 @@ export function AppShell({
         />
       </div>
 
-      <div className="md:hidden fixed top-0 left-0 right-0 z-40 border-b border-gray-800 bg-[#111827]">
+      <div className={`md:hidden fixed top-0 left-0 right-0 z-40 border-b ${mobileMenuOpen ? 'hidden' : ''} ${isDark ? 'border-gray-800 bg-[#111827]' : 'border-[#000b82] bg-[#000e9c]'}`}>
         <div className="flex items-center justify-between p-4">
           <AppButton
             onClick={() => setMobileMenuOpen(true)}
             tone="ghost"
-            className="h-10 w-10 rounded-lg border-none bg-transparent p-2 hover:bg-gray-800"
+            aria-label="Open navigation menu"
+            aria-haspopup="dialog"
+            aria-expanded={mobileMenuOpen}
+            aria-controls="gp-mobile-nav"
+            className={`h-10 w-10 rounded-lg border-none bg-transparent p-2 ${isDark ? 'hover:bg-gray-800' : 'hover:bg-white/15'}`}
           >
-            <Menu className="w-6 h-6 text-white" />
+            <Menu className={`w-6 h-6 ${isDark ? 'text-white' : 'text-white'}`} />
           </AppButton>
-          <h1 className="text-base font-bold truncate max-w-[70%] text-white">
-            OVHcloud Game Panel
-          </h1>
+          <img
+            src="/OVHcloud_Game_Panel_Logo.png"
+            alt="OVHcloud Game Panel"
+            draggable={false}
+            className="h-8 w-auto max-w-[70%] object-contain brightness-0 invert select-none"
+          />
           <div className="w-10"></div>
         </div>
       </div>
 
       {mobileMenuOpen && (
         <>
-          <div
+          <button
+            type="button"
+            aria-label="Close navigation menu"
             className="fixed inset-0 bg-black/50 z-50 md:hidden"
             onClick={() => setMobileMenuOpen(false)}
           />
-          <div className="fixed top-0 left-0 bottom-0 w-[280px] z-50 md:hidden overflow-y-auto bg-[#111827]">
+          <div
+            id="gp-mobile-nav"
+            ref={mobileNavRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Navigation menu"
+            tabIndex={-1}
+            className={`fixed top-0 left-0 bottom-0 w-[280px] z-50 md:hidden overflow-y-auto focus:outline-none ${isDark ? 'bg-[#111827]' : 'bg-white'}`}
+          >
             <Sidebar
               activeTab={activeTab}
               onTabChange={(tab) => {
@@ -189,7 +230,9 @@ export function AppShell({
       <main className="flex-1 w-full overflow-x-hidden bg-transparent pt-16 md:pl-52 md:pt-0">
         {activeTab === 'host-status' && (
           <AppPageLayout className={pageShellClassName}>
-            <HostStatus />
+            <Suspense fallback={<div className="p-6 text-sm text-gray-400">Loading…</div>}>
+              <HostStatus />
+            </Suspense>
           </AppPageLayout>
         )}
 
@@ -204,14 +247,10 @@ export function AppShell({
               metricsHistoryByServer={serverMetricsHistoryById}
               historyByServer={serverHistoryById}
               gameNamesByKey={gameNamesByKey}
-              terminalReadyByServer={consoleReadyByServer}
               currentUser={currentUser}
               permissionsByServer={serverPermissionsById}
               onDelete={handleDeleteServer}
               onAction={handleServerAction}
-              onOpenConsoleTerminal={(serverId, serverName) =>
-                openConsoleTerminal(Number(serverId), serverName)
-              }
               onRename={handleRenameServer}
               onRefresh={handleRefreshServerSnapshot}
               onStartAll={handleStartAll}
@@ -223,6 +262,7 @@ export function AppShell({
             <InstallGameServer
               isOpen={installModalOpen}
               onClose={() => setInstallModalOpen(false)}
+              onReopen={() => setInstallModalOpen(true)}
               onInstall={handleInstallGame}
               canInstall={canInstallServers}
               installing={installing}
@@ -230,6 +270,9 @@ export function AppShell({
               installProgressPercent={installProgressPercent}
               installStatus={installStatus}
               installServerId={installServerId}
+              installInteraction={installInteraction}
+              setInstallInteraction={setInstallInteraction}
+              installPlan={installPlan}
               installPermissionsSyncing={installPermissionsSyncing}
               canOpenInstallLog={installServerId !== null}
               usedPorts={{
@@ -246,13 +289,14 @@ export function AppShell({
                 servers={gameServers}
                 logs={serverLogs}
                 cliMessages={cliMessages}
-                consoleReadyByServer={consoleReadyByServer}
                 onClearLogs={handleClearServerLogs}
                 onClearCLI={handleClearCLI}
                 activeTab={activeConsoleTab}
                 onSetActiveTab={setActiveConsoleTab}
                 onCloseTab={handleCloseConsoleTab}
                 openTabs={openConsoleTabs}
+                canSendCommandByServer={canSendCommandByServer}
+                onSendCommand={handleSendConsoleCommand}
               />
             </div>
           </AppPageLayout>
@@ -274,13 +318,6 @@ export function AppShell({
           </AppPageLayout>
         )}
       </main>
-
-      <ServerConsoleTerminalModal
-        isOpen={Boolean(consoleTerminalTarget)}
-        serverId={consoleTerminalTarget?.serverId ?? null}
-        serverName={consoleTerminalTarget?.serverName ?? 'Server'}
-        onClose={() => setConsoleTerminalTarget(null)}
-      />
 
       <LogPromptToasts toasts={activeLogPromptToasts} onClose={removeLogPromptToast} />
 

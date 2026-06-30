@@ -2,14 +2,8 @@ import type { IncomingMessage } from 'http';
 import WebSocket from 'ws';
 
 import { extractTokenFromHeader, verifyToken } from '../utils/auth.js';
-import type { AuthenticatedWebSocket, WSMessage } from './types.js';
+import type { AuthenticatedWebSocket, OutgoingWebSocketMessage, WSMessage } from './types.js';
 
-/**
- * Best-effort authentication at connection time:
- * - Authorization header (Bearer token)
- *
- * Returns `false` only if a token was provided but invalid.
- */
 export function authenticateFromRequest(ws: AuthenticatedWebSocket, req: IncomingMessage): boolean {
     const tokenFromHeader = extractTokenFromHeader(req.headers.authorization);
     const token = tokenFromHeader;
@@ -21,6 +15,7 @@ export function authenticateFromRequest(ws: AuthenticatedWebSocket, req: Incomin
         const user = verifyToken(token);
         ws.userId = user.userId;
         ws.isRoot = Boolean(user.isRoot);
+        ws.tokenVersion = user.tokenVersion;
         return true;
     } catch {
         ws.close(1008, 'Invalid token');
@@ -28,22 +23,17 @@ export function authenticateFromRequest(ws: AuthenticatedWebSocket, req: Incomin
     }
 }
 
-/**
- * Auth during WS messaging (when a client connected without a token).
- * Returns true if authenticated successfully.
- */
 export function authenticateFromMessage(ws: AuthenticatedWebSocket, message: WSMessage): boolean {
-    const token = (message as any)?.data?.token || (message as any)?.token;
-
-    if (message.type !== 'auth' || typeof token !== 'string') {
+    if (message.type !== 'auth' || typeof message.token !== 'string') {
         sendSafe(ws, { type: 'error', error: 'Unauthorized' });
         return false;
     }
 
     try {
-        const user = verifyToken(token);
+        const user = verifyToken(message.token);
         ws.userId = user.userId;
         ws.isRoot = Boolean(user.isRoot);
+        ws.tokenVersion = user.tokenVersion;
         return true;
     } catch {
         sendSafe(ws, { type: 'error', error: 'Invalid token' });
@@ -52,10 +42,7 @@ export function authenticateFromMessage(ws: AuthenticatedWebSocket, message: WSM
     }
 }
 
-/**
- * Safe JSON send helper used across websocket modules.
- */
-export function sendSafe(ws: WebSocket, payload: unknown): void {
+export function sendSafe(ws: WebSocket, payload: OutgoingWebSocketMessage): void {
     if (ws.readyState !== WebSocket.OPEN) return;
 
     try {

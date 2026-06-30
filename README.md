@@ -1,60 +1,64 @@
-# OVHcloud Game Panel
+<div align="center">
 
-OVHcloud Game Panel is a self-hosted web control panel for operating Dockerized
-game servers from a browser.
+# 🎮 OVHcloud Game Panel
 
-Version `v1.0.0-beta.1` is the first public beta of the project. It focuses on
-LinuxGSM-based game servers and provides the core workflows required to install,
-operate, observe, and maintain game server containers.
+### Deploy and manage your game servers in minutes — from one clean, modern web interface.
 
-## What It Provides
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+![Platform](https://img.shields.io/badge/Platform-Linux-1793D1)
+[![Made by OVHcloud](https://img.shields.io/badge/Made%20by-OVHcloud-000e9c)](https://www.ovhcloud.com/)
 
-- LinuxGSM-based game server installation and management.
-- Docker container orchestration for each game server.
-- Server lifecycle actions: install, start, stop, restart, rename, and delete.
-- Real-time installation progress, server status, logs, and console workflows.
-- Per-server CPU and memory metrics with history views.
-- Host status monitoring for CPU, memory, disk, and network usage.
-- Built-in file management for server data and backup directories.
-- LinuxGSM backup creation, listing, download, deletion, and retention settings.
-- Backup and game update scheduling through LinuxGSM cron workflows.
-- SFTP access management for server files.
-- User management with global permissions and per-server permissions.
-- Operational views for resources, activity, and day-to-day server management.
+<img src="docs/assets/game-panel.png" alt="OVHcloud Game Panel" width="900">
 
-## Server Support
+</div>
 
-This beta is designed for LinuxGSM-compatible servers. Game availability follows
-the LinuxGSM catalog and the Docker images used by the LinuxGSM workflow.
+<br>
 
-LinuxGSM server catalog: <https://linuxgsm.com/servers/>
+OVHcloud Game Panel is an **open-source, self-hosted** control panel to deploy, run, and monitor your game servers — **without ever touching the command line**. Spin up a Minecraft, Counter-Strike 2, or Hytale server in a few clicks, then manage its files, backups, player access, and performance from a single modern dashboard. 🚀
 
-## Architecture
+## ✨ Features
 
-- `frontend/`: React and Vite user interface.
-- `backend/`: Node.js, Express, WebSocket, and SQLite backend.
-- Docker: container runtime for managed game servers.
-- SQLite: local application database.
-- LinuxGSM: game server installation and operation layer.
+- 🎛️ Complete server lifecycle management (create, start, stop, restart…).
+- 📊 Live status, logs, metrics, and installation tracking.
+- 🕹️ Interactive in-browser game console.
+- 📁 Powerful built-in file manager.
+- 💾 One-click backups and restores.
+- ⏰ Flexible task scheduling.
+- 🐳 Advanced container configuration.
+- 🔐 Fine-grained user permissions.
+- 📈 Real-time host monitoring.
+- 💻 Integrated container terminal.
+- 🔄 Built-in one-click panel updater.
 
-## Deployment Model
+## 🕹️ Supported games
 
-> OVHcloud Game Panel is distributed as an unmanaged self-hosted application. It is
-intended for operators who run the panel on their own Linux machine.
+**Natively supported**, ready to deploy with OVHcloud-maintained images:
 
-Before installation, you need:
+- ⛏️ **Minecraft** — Java Edition, Paper, Fabric, NeoForge, and Bedrock Edition
+- 🔫 **Counter-Strike 2**
+- 🗡️ **Hytale**
 
-- a Linux machine running Debian 12, Debian 13, or Ubuntu 24.04;
-- a domain name pointing to the public IP address of the machine;
-- access to a shell with administrative privileges.
+**And many more.** Game Panel integrates the full [LinuxGSM](https://linuxgsm.com/servers/) library, giving you a huge catalogue of additional dedicated game servers out of the box.
 
-If you still need infrastructure:
+Your game isn't listed? You can also **add any external Docker image** and run it straight from the panel. 🐳
 
-- Domain name: <https://www.ovhcloud.com/en-ie/domains/>
-- VPS: <https://www.ovhcloud.com/en-ie/vps/>
-- Dedicated server: <https://www.ovhcloud.com/en-ie/bare-metal/>
+## 🚀 Installation
 
-Example installation:
+### ⚡ Automatic — OVHcloud VPS or Dedicated Server (recommended)
+
+Game Panel can be installed **automatically, in one click**, when you deploy an OVHcloud **VPS** or **Dedicated Server**. *(Guide coming soon.)*
+
+### 🛠️ Manual installation
+
+**Prerequisites:**
+
+- a Linux machine running Debian 12/13 or Ubuntu 22.04 / 24.04 / 25.10 / 26.04;
+- a domain name pointing to the machine's public IP address;
+- shell access with administrative privileges.
+
+Don't have the infrastructure yet? 🌐 [Domain name](https://www.ovhcloud.com/en-ie/domains/) · 🖥️ [VPS](https://www.ovhcloud.com/en-ie/vps/) · 🗄️ [Dedicated server](https://www.ovhcloud.com/en-ie/bare-metal/)
+
+**Command to run:**
 
 ```bash
 sudo apt install git
@@ -63,27 +67,32 @@ cd game-panel
 sudo bash ./deploy/install.sh
 ```
 
-During installation, you will be prompted for:
+During installation, you'll be prompted for:
 
 - Domain name
 - Admin password
 - Admin username (optional, default: `admin`)
 - Let's Encrypt email
 
-After installation, the panel is available at:
+Once installed, your panel is live at **`https://<your-domain>`** 🎉
 
-```text
-https://<your-domain>
-```
+> 📡 OVHcloud Game Panel sends usage telemetry by default. You can disable it at install with `--telemetry-disabled`. See [docs/TELEMETRY.md](docs/TELEMETRY.md).
 
-## Updating
+## 🏗️ Architecture
 
-From the installation directory:
+Under the hood, a **React + Vite** frontend talks to a **Node.js** backend (Express, WebSocket, SQLite) that orchestrates the full server lifecycle — files, backups, permissions, metrics, and container configuration — through the **Docker** engine.
 
-```bash
-git pull --ff-only origin main
-sudo bash ./deploy/update.sh
-```
+- `frontend/` — React and Vite user interface.
+- `backend/` — Node.js, Express, WebSocket, and SQLite backend.
+- `docker-images/` — OVHcloud game server images and operational images.
+- `deploy/` — self-hosted installation and update scripts.
 
-To update from another branch, switch to that branch first, pull it, then run the
-update script.
+## 📚 Documentation & support
+
+- 📋 [Changelog](CHANGELOG.md)
+- 📡 [Telemetry](docs/TELEMETRY.md)
+- 💬 [Contact OVHcloud support](https://www.ovhcloud.com/en/contact/)
+
+## 📄 License
+
+Licensed under the **Apache License 2.0** — see [LICENSE](LICENSE).

@@ -1,8 +1,9 @@
-import { useState, type ReactNode } from 'react';
-import { KeyRound, Power, X } from 'lucide-react';
+import { useState, useRef, useEffect, type ReactNode } from 'react';
+import { KeyRound, Moon, MoreVertical, Power, Sun, X } from 'lucide-react';
 import { Icon, type IconName } from '@ovhcloud/ods-react';
 import { getAppVersion } from '../utils/appInfo';
 import type { AuthUser } from '../utils/permissions';
+import { useTheme } from '../contexts/ThemeContext';
 import {
   AppButton,
   AppModal,
@@ -12,6 +13,9 @@ import {
   AppModalHeader,
   AppModalTitle,
 } from '../src/ui/components';
+import { PanelUpdateModal } from './PanelUpdateModal';
+import { apiClient } from '../utils/api';
+import { useBodyScrollLock } from '../src/ui/utils/useBodyScrollLock';
 
 interface SidebarProps {
   activeTab: string;
@@ -64,6 +68,101 @@ function LegalList({ items }: { items: string[] }) {
   );
 }
 
+interface UserMenuRowProps {
+  currentUserInitial: string;
+  currentUserLabel: string;
+  isDark: boolean;
+  toggleTheme: () => void;
+  onChangePassword?: () => void;
+  onLogout?: () => void;
+}
+
+function UserMenuRow({
+  currentUserInitial,
+  currentUserLabel,
+  isDark,
+  toggleTheme,
+  onChangePassword,
+  onLogout,
+}: UserMenuRowProps) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [open]);
+
+  return (
+    <div className="flex items-center gap-2 px-1 py-0.5">
+      <div className="gp-user-avatar flex h-9 w-9 shrink-0 items-center justify-center rounded-full border text-sm font-semibold border-[#324666] bg-[#0f1a2b] text-[var(--color-cyan-400)]">
+        {currentUserInitial}
+      </div>
+      <p
+        className="min-w-0 flex-1 truncate text-sm font-semibold text-gray-100"
+        title={currentUserLabel}
+      >
+        {currentUserLabel}
+      </p>
+      <button
+        type="button"
+        onClick={toggleTheme}
+        className={`cursor-pointer shrink-0 rounded-md p-1 transition-colors ${isDark ? 'text-gray-400 hover:bg-gray-700 hover:text-gray-200' : 'text-white/70 hover:bg-white/10 hover:text-white'}`}
+        aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+        title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+      >
+        {isDark ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
+      </button>
+      <div
+        ref={ref}
+        className="relative shrink-0"
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') setOpen(false);
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className={`cursor-pointer rounded-md p-1 transition-colors ${isDark ? 'text-gray-400 hover:bg-gray-700 hover:text-gray-200' : 'text-white/70 hover:bg-white/10 hover:text-white'}`}
+          aria-label="User menu"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          title="User menu"
+        >
+          <MoreVertical className="h-4 w-4" />
+        </button>
+        {open && (
+          <div className={`absolute bottom-full right-0 mb-3 w-44 overflow-hidden rounded-xl border shadow-lg ${isDark ? 'border-white/10 bg-[#0f1a2b]' : 'border-gray-200 bg-white'}`}>
+            <button
+              type="button"
+              onClick={() => { setOpen(false); onChangePassword?.(); }}
+              className={`flex w-full items-center gap-2.5 px-3 py-2.5 text-sm font-medium transition-colors ${isDark ? 'text-[#eef4fa] hover:bg-[#1c2e47]' : 'text-gray-800 hover:bg-gray-100'}`}
+            >
+              <KeyRound className="h-4 w-4 text-[var(--color-cyan-400)]" />
+              Change password
+            </button>
+            <div className={`mx-2 border-t ${isDark ? 'border-white/10' : 'border-gray-200'}`} />
+            <button
+              type="button"
+              onClick={() => { setOpen(false); onLogout?.(); }}
+              className={`flex w-full items-center gap-2.5 px-3 py-2.5 text-sm font-medium text-[#e86180] transition-colors ${isDark ? 'hover:bg-[#291126]' : 'hover:bg-red-50'}`}
+            >
+              <Power className="h-4 w-4" />
+              Log out
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function Sidebar({
   activeTab,
   onTabChange,
@@ -74,11 +173,29 @@ export function Sidebar({
   currentUser = null,
 }: SidebarProps) {
   const [isLegalModalOpen, setIsLegalModalOpen] = useState(false);
+  const [isEasterEggOpen, setIsEasterEggOpen] = useState(false);
+  useBodyScrollLock(isLegalModalOpen || isEasterEggOpen);
+  const [logoClickCount, setLogoClickCount] = useState(0);
+  const [isPanelUpdateOpen, setIsPanelUpdateOpen] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState<{
+    currentVersion: string;
+    latestVersion: string | null;
+    updateAvailable: boolean;
+  } | null>(null);
+  const { theme, toggleTheme } = useTheme();
+  const isDark = theme === 'dark';
   const layoutClasses = staticLayout ? 'relative h-full' : 'fixed left-0 top-0 h-screen';
   const widthClasses = staticLayout ? 'w-full' : 'w-52';
   const currentUserLabel = currentUser?.username || 'Unknown user';
   const currentUserInitial = currentUserLabel.trim().charAt(0).toUpperCase() || '?';
   const appVersion = getAppVersion();
+
+  useEffect(() => {
+    if (!currentUser?.isRoot) return;
+    apiClient.checkPanelUpdate()
+      .then(setUpdateInfo)
+      .catch(() => {});
+  }, [currentUser?.isRoot]);
 
   const menuItems: Array<{ id: string; label: string; iconName: IconName; disabled?: boolean }> = [
     { id: 'game-servers', label: 'Game Servers', iconName: 'game-controller-alt' },
@@ -89,23 +206,29 @@ export function Sidebar({
 
   return (
     <aside
-      className={`${widthClasses} border-r flex flex-col ${layoutClasses} overflow-y-auto border-white/10 bg-[#111827]`}
+      className={`${widthClasses} border-r flex flex-col ${layoutClasses} overflow-y-auto ${isDark ? 'border-white/10 bg-[#111827]' : 'border-[#000b82] bg-[#000e9c]'}`}
     >
-      <div className="border-b border-white/10 p-4">
-        <div className="flex flex-col items-center justify-center gap-1">
-          <div className="h-8 flex items-center justify-center">
-            <img
-              src="/ovhcloud-logo.png"
-              alt="OVHcloud"
-              draggable={false}
-              className="h-full max-w-[150px] object-contain brightness-0 invert"
-            />
-          </div>
-          <p className="text-sm font-medium leading-none text-gray-200">Game Panel</p>
+      <div className={`border-b px-4 py-3 ${isDark ? 'border-white/10' : 'border-white/40'}`}>
+        <div className="flex items-center justify-center">
+          <img
+            src="/OVHcloud_Game_Panel_Logo.png"
+            alt="OVHcloud Game Panel"
+            draggable={false}
+            className="h-10 w-auto object-contain brightness-0 invert cursor-pointer select-none"
+            onClick={() => {
+              const next = logoClickCount + 1;
+              if (next >= 5) {
+                setIsEasterEggOpen(true);
+                setLogoClickCount(0);
+              } else {
+                setLogoClickCount(next);
+              }
+            }}
+          />
         </div>
       </div>
 
-      <nav className="p-2 flex-1">
+      <nav className="gp-sidebar-nav p-2 flex-1">
         {menuItems.map((item) => {
           const isActive = activeTab === item.id;
           const isDisabled = Boolean(item.disabled);
@@ -113,6 +236,7 @@ export function Sidebar({
           return (
             <AppButton
               key={item.id}
+              aria-current={isActive ? 'page' : undefined}
               onClick={() => {
                 if (isDisabled) return;
                 onTabChange(item.id);
@@ -121,10 +245,14 @@ export function Sidebar({
               tone={isActive ? 'secondary' : 'ghost'}
               className={`mb-1 flex w-full items-center justify-start gap-3 rounded-lg px-4 py-3 text-left transition-colors ${
                 isDisabled
-                  ? 'text-gray-600 cursor-not-allowed opacity-60'
+                  ? isDark ? 'text-gray-600 cursor-not-allowed opacity-60' : 'text-white/30 cursor-not-allowed opacity-60'
                   : isActive
-                    ? 'border-[var(--gp-primary-300)] bg-[var(--gp-primary-300)] text-[#031126] hover:border-[var(--gp-primary-200)] hover:bg-[var(--gp-primary-200)] hover:text-[#031126]'
-                    : 'border-none bg-transparent text-gray-400 hover:bg-gray-800 hover:text-[var(--gp-primary-300)]'
+                    ? isDark
+                      ? 'border-[var(--gp-primary-300)] bg-[var(--gp-primary-300)] text-[#031126] hover:border-[var(--gp-primary-200)] hover:bg-[var(--gp-primary-200)] hover:text-[#031126]'
+                      : 'border-white/20 bg-white/90 text-[#00185e] font-semibold hover:bg-white'
+                    : isDark
+                      ? 'border-none bg-transparent text-gray-400 hover:bg-gray-800 hover:text-[var(--gp-primary-300)]'
+                      : 'border-none bg-transparent text-white/80 hover:bg-white/15 hover:text-white'
               }`}
             >
               <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
@@ -136,42 +264,16 @@ export function Sidebar({
         })}
       </nav>
 
-      <div className="border-y border-white/10 bg-transparent px-2 py-2.5">
-        <div className="mb-2.5 flex items-center justify-center gap-2">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#324666] bg-[#0f1a2b] text-sm font-semibold text-[var(--color-cyan-400)]">
-            {currentUserInitial}
-          </div>
-          <p
-            className="max-w-[120px] truncate text-center text-sm font-semibold text-gray-100"
-            title={currentUserLabel}
-          >
-            {currentUserLabel}
-          </p>
-        </div>
-
-        <div className="space-y-2">
-          <AppButton
-            type="button"
-            onClick={onChangePassword}
-            tone="ghost"
-            className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-[var(--color-cyan-400)] bg-[#3b4a63] px-2.5 text-sm font-semibold text-[#eef4fa] transition-colors hover:bg-[#465671]"
-            aria-label="Passwords"
-            title="Passwords"
-          >
-            <KeyRound className="h-4 w-4" />
-            Passwords
-          </AppButton>
-
-          <AppButton
-            type="button"
-            onClick={onLogout}
-            tone="ghost"
-            className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-[#991b4e] bg-[#291126] px-2.5 text-sm font-semibold text-[#e86180] transition-colors hover:bg-[#33152f] hover:text-[#f17993]"
-          >
-            <Power className="h-4 w-4" />
-            Log out
-          </AppButton>
-        </div>
+      <div className="gp-sidebar-bottom">
+      <div className="border-y bg-transparent px-2 py-2.5 border-white/10">
+        <UserMenuRow
+          currentUserInitial={currentUserInitial}
+          currentUserLabel={currentUserLabel}
+          isDark={isDark}
+          toggleTheme={toggleTheme}
+          onChangePassword={onChangePassword}
+          onLogout={onLogout}
+        />
       </div>
 
       <div className="px-3 py-3">
@@ -179,50 +281,38 @@ export function Sidebar({
           <h3 className="mb-4 text-xs font-medium text-gray-400">Follow Us</h3>
 
           <div className="flex items-center justify-center gap-6">
-            <a
-              href="https://www.reddit.com/r/OVHcloud/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center justify-center"
-              aria-label="Reddit"
-            >
-              <img src="/social-reddit.png" alt="Reddit" className="h-5 w-5 object-contain" draggable={false} />
+            {/* Reddit */}
+            <a href="https://www.reddit.com/r/OVHcloud/" target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center" aria-label="Reddit">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
+                <path fill="#FF4500" d="M17.484 6.497c-1.182 0-2.171-.821-2.433-1.924a2.93 2.93 0 0 0-2.539 2.925v.009a8.6 8.6 0 0 1 5.856 1.702 2.8 2.8 0 0 1 2.133-.727 3.505 3.505 0 0 1 1.444 6.018C21.833 18.57 17.397 21.5 11.953 21.5c-5.444 0-9.868-2.92-9.985-6.977A3.506 3.506 0 0 1 3.428 8.48c.807 0 1.55.274 2.148.736a8.633 8.633 0 0 1 5.8-1.705v-.014a3.005 3.005 0 0 1 3.602-2.975A2.494 2.494 0 1 1 17.484 6.497ZM6.63 12.488c-1.03 0-1.917 1.024-1.979 2.357-.062 1.333.84 1.875 1.872 1.875 1.03 0 1.8-.484 1.86-1.817.062-1.333-.726-2.414-1.753-2.414Zm10.646 2.357c-.061-1.333-.948-2.357-1.979-2.357s-1.813 1.08-1.752 2.414c.061 1.333.834 1.817 1.864 1.817 1.03 0 1.933-.542 1.868-1.875Zm-5.342 2.59c-1.278 0-2.5.064-3.633.178-.193.02-.316.22-.24.399.634 1.51 2.12 2.567 3.866 2.567s3.232-1.056 3.87-2.567c.074-.18-.05-.38-.244-.4-1.132-.113-2.354-.177-3.62-.177Z" />
+              </svg>
             </a>
 
-            <a
-              href="https://x.com/OVHcloud_FR"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center justify-center"
-              aria-label="X (Twitter)"
-            >
-              <img src="/social-x.svg" alt="X" className="h-5 w-5 object-contain" draggable={false} />
+            {/* X (Twitter) */}
+            <a href="https://x.com/OVHcloud_FR" target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center" aria-label="X (Twitter)">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1227" className="h-5 w-5" aria-hidden="true">
+                <path fill="#FFFFFF" d="M714.163 519.284L1160.89 0H1055.03L667.137 450.887L357.328 0H0L468.492 681.821L0 1226.37H105.866L515.491 750.218L842.672 1226.37H1200L714.137 519.284H714.163ZM569.165 687.828L521.697 619.934L144.011 79.6944H306.615L611.412 515.685L658.88 583.579L1055.08 1150.3H892.476L569.165 687.854V687.828Z" />
+              </svg>
             </a>
 
-            <a
-              href="https://discord.gg/ovhcloud"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center justify-center"
-              aria-label="Discord"
-            >
-              <img src="/social-discord.svg" alt="Discord" className="h-5 w-5 object-contain" draggable={false} />
+            {/* Discord */}
+            <a href="https://discord.gg/ovhcloud" target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center" aria-label="Discord">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 59 44" className="h-5 w-5" aria-hidden="true">
+                <path fill="#5865F2" d="M37.1937 0C36.6265 1.0071 36.1172 2.04893 35.6541 3.11392C31.2553 2.45409 26.7754 2.45409 22.365 3.11392C21.9136 2.04893 21.3926 1.0071 20.8254 0C16.6928 0.70613 12.6644 1.94475 8.84436 3.69271C1.27372 14.9098 -0.775214 25.8374 0.243466 36.6146C4.67704 39.8906 9.6431 42.391 14.9333 43.9884C16.1256 42.391 17.179 40.6893 18.0819 38.9182C16.3687 38.2815 14.7133 37.4828 13.1274 36.5567C13.5442 36.2557 13.9493 35.9432 14.3429 35.6422C23.6384 40.0179 34.4039 40.0179 43.711 35.6422C44.1046 35.9663 44.5097 36.2789 44.9264 36.5567C43.3405 37.4943 41.6852 38.2815 39.9604 38.9298C40.8633 40.7009 41.9167 42.4025 43.109 44C48.3992 42.4025 53.3653 39.9137 57.7988 36.6377C59.0027 24.1358 55.7383 13.3007 49.1748 3.70429C45.3663 1.95633 41.3379 0.717706 37.2053 0.0231518L37.1937 0ZM19.3784 29.9816C16.5192 29.9816 14.1461 27.3886 14.1461 24.1821C14.1461 20.9755 16.4266 18.371 19.3669 18.371C22.3071 18.371 24.6455 20.9871 24.5992 24.1821C24.5529 27.377 22.2956 29.9816 19.3784 29.9816ZM38.6639 29.9816C35.7931 29.9816 33.4431 27.3886 33.4431 24.1821C33.4431 20.9755 35.7236 18.371 38.6639 18.371C41.6042 18.371 43.9309 20.9871 43.8846 24.1821C43.8383 27.377 41.581 29.9816 38.6639 29.9816Z" />
+              </svg>
             </a>
 
-            <a
-              href="https://www.youtube.com/@OvhGroup"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center justify-center"
-              aria-label="YouTube"
-            >
-              <img src="/social-youtube.svg" alt="YouTube" className="h-5 w-5 object-contain" draggable={false} />
+            {/* YouTube */}
+            <a href="https://www.youtube.com/@OvhGroup" target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center" aria-label="YouTube">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
+                <path fill="#FF0000" d="M23.74 7.1s-.23-1.65-.95-2.37c-.91-.96-1.93-.96-2.4-1.02C17.04 3.47 12 3.5 12 3.5s-5.02-.03-8.37.21c-.46.06-1.48.06-2.39 1.02C.52 5.45.28 7.1.28 7.1S.04 9.05 0 10.98V13c.04 1.94.28 3.87.28 3.87s.24 1.65.96 2.38c.91.95 2.1.92 2.64 1.02 1.88.18 7.91.22 8.12.22 0 0 5.05.01 8.4-.23.46-.06 1.48-.06 2.39-1.02.72-.72.96-2.37.96-2.37s.24-1.94.25-3.87v-2.02c-.02-1.93-.26-3.88-.26-3.88zM9.57 15.5V8.49L16 12.13 9.57 15.5z" />
+              </svg>
             </a>
           </div>
         </div>
       </div>
 
-      <div className="border-t border-white/10 px-3 py-2">
+      <div className="border-t px-3 py-3 border-white/10">
         <div className="flex justify-center">
           <a
             href="https://fr.trustpilot.com/review/ovhcloud.com"
@@ -239,17 +329,32 @@ export function Sidebar({
           </a>
         </div>
 
-        <div className="mt-1 flex items-center justify-center gap-2 text-[10px] text-gray-500">
-          <span>Game Panel v{appVersion}</span>
+        <div className="mt-2.5 flex items-center justify-center gap-2 text-[10px] text-gray-500">
+          {currentUser?.isRoot ? (
+            <button
+              type="button"
+              onClick={() => setIsPanelUpdateOpen(true)}
+              className="relative rounded-sm px-1 text-[10px] transition-colors text-gray-500 hover:text-gray-300"
+              title={updateInfo?.updateAvailable ? `Update available: v${updateInfo.latestVersion}` : 'Panel update'}
+            >
+              Game Panel v{appVersion}
+              {updateInfo?.updateAvailable && (
+                <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-orange-400 ring-2 ring-[#000e9c] dark:ring-[#111827]" />
+              )}
+            </button>
+          ) : (
+            <span>Game Panel v{appVersion}</span>
+          )}
           <button
             type="button"
             onClick={() => setIsLegalModalOpen(true)}
-            className="rounded-sm px-1 text-[10px] text-gray-500 transition-colors hover:text-gray-300"
+            className="rounded-sm px-1 text-[10px] transition-colors text-gray-500 hover:text-gray-300"
           >
             Legal
           </button>
         </div>
       </div>
+      </div>{/* end gp-sidebar-bottom */}
 
       <AppModal
         open={isLegalModalOpen}
@@ -258,14 +363,14 @@ export function Sidebar({
       >
         <AppModalContent
           dismissible={false}
-          className="w-full max-w-5xl overflow-hidden rounded-2xl border border-white/10 bg-[#0d1524] shadow-[0_30px_120px_rgba(0,0,0,0.55)]"
+          className={`w-full max-w-5xl overflow-hidden rounded-2xl border shadow-[0_30px_120px_rgba(0,0,0,0.25)] ${isDark ? 'border-white/10 bg-[#0d1524] shadow-[0_30px_120px_rgba(0,0,0,0.55)]' : 'border-[#e2e8f0] bg-white'}`}
         >
-          <AppModalHeader className="flex items-start justify-between border-b border-white/10 bg-[#101a2d] p-6">
+          <AppModalHeader className={`flex items-start justify-between border-b p-6 ${isDark ? 'border-white/10 bg-[#101a2d]' : 'border-[#e2e8f0] bg-[#f8fafc]'}`}>
             <div className="space-y-1">
-              <AppModalTitle className="text-2xl font-semibold tracking-tight text-white">
+              <AppModalTitle className={`text-2xl font-semibold tracking-tight ${isDark ? 'text-white' : 'text-[#0f172a]'}`}>
                 Terms and Conditions, Terms of Use and Privacy Policy
               </AppModalTitle>
-              <AppModalDescription className="text-slate-400">
+              <AppModalDescription className={isDark ? 'text-slate-400' : 'text-[#64748b]'}>
                 Version in effect as of: 12/03/2026
               </AppModalDescription>
             </div>
@@ -273,16 +378,16 @@ export function Sidebar({
               type="button"
               tone="ghost"
               onClick={() => setIsLegalModalOpen(false)}
-              className="rounded border-none bg-transparent p-2 text-gray-400 transition-colors hover:bg-gray-700 hover:text-red-400"
+              className={`rounded border-none bg-transparent p-2 transition-colors ${isDark ? 'text-gray-400 hover:bg-gray-700 hover:text-red-400' : 'text-[#94a3b8] hover:bg-[#f0f4f8] hover:text-[#dc2626]'}`}
               aria-label="Close legal modal"
             >
               <X className="h-5 w-5" />
             </AppButton>
           </AppModalHeader>
 
-          <AppModalBody className="max-h-[75vh] overflow-y-auto p-0">
+          <AppModalBody className="max-h-[85vh] overflow-y-auto p-0">
             <div className="px-6 py-6">
-              <div className="mx-auto max-w-3xl space-y-6">
+              <div className="space-y-6">
                 <LegalSection number="1" title="Terms and conditions">
                   <div className="grid gap-6 md:grid-cols-2">
                     <div className="space-y-3">
@@ -424,7 +529,7 @@ export function Sidebar({
                       'data loss',
                       'incorrect server configuration',
                       'accidental deletion of files',
-                      'improper use of the Game Panel (especially via SSH)',
+                      'improper use of the Game Panel (especially via the terminal)',
                       'interruption of gaming services',
                       'misuse by third parties',
                       "IT attacks targeting users' servers.",
@@ -633,6 +738,42 @@ export function Sidebar({
                   </p>
                 </LegalSection>
               </div>
+            </div>
+          </AppModalBody>
+        </AppModalContent>
+      </AppModal>
+
+      <PanelUpdateModal
+        isOpen={isPanelUpdateOpen}
+        onClose={() => setIsPanelUpdateOpen(false)}
+        updateInfo={updateInfo}
+      />
+
+      <AppModal open={isEasterEggOpen} onOpenChange={setIsEasterEggOpen}>
+        <AppModalContent dismissible={false} className="relative z-[61] w-[calc(100%-2rem)] max-w-2xl overflow-hidden rounded-lg p-0">
+          <div className="flex justify-end px-3 pt-3 pb-1">
+            <button
+              type="button"
+              onClick={() => setIsEasterEggOpen(false)}
+              className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-700 dark:hover:text-white transition-colors"
+              aria-label="Close"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+          <AppModalBody className="!overflow-hidden px-6 pb-6 !pt-0">
+            <div className="flex flex-col items-center gap-4 text-center">
+              <div>
+                <AppModalDescription className="text-xl font-bold text-gray-900 dark:text-white">
+                  Meet the team behind the OVHcloud Game Panel!
+                </AppModalDescription>
+              </div>
+              <img
+                src="/GPteam.png"
+                alt="OVHcloud Game Panel team"
+                draggable={false}
+                className="w-full rounded-lg object-contain select-none"
+              />
             </div>
           </AppModalBody>
         </AppModalContent>

@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import type { Duplex } from 'node:stream';
 import { docker } from '../utils/docker/client.js';
 
-type TerminalKind = 'shell' | 'console';
+type TerminalKind = 'shell';
 
 type TerminalSession = {
     sessionId: string;
@@ -10,7 +10,6 @@ type TerminalSession = {
     containerId: string;
     ownerUserId: number;
     kind: TerminalKind;
-    consoleSessionName?: string;
 
     execId?: string;
     exec?: any;
@@ -32,16 +31,6 @@ const UNATTACHED_TTL_MS = 60_000;
 
 function now() {
     return Date.now();
-}
-
-function sanitizeSessionName(raw?: string): string {
-    const value = String(raw ?? '').trim();
-    if (!value) return '';
-    return value.replace(/[^a-zA-Z0-9_.-]/g, '');
-}
-
-function escapeRegex(value: string): string {
-    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function cleanupSession(sessionId: string): void {
@@ -130,18 +119,6 @@ function pruneTerminalSessions(): void {
     }
 }
 
-function hasActiveConsoleSession(serverId: number): boolean {
-    for (const s of SESSIONS.values()) {
-        if (s.serverId === serverId && s.kind === 'console') return true;
-    }
-    return false;
-}
-
-export function isConsoleSessionInUse(serverId: number): boolean {
-    pruneTerminalSessions();
-    return hasActiveConsoleSession(serverId);
-}
-
 export async function createTerminalSession(opts: {
     serverId: number;
     containerId: string;
@@ -151,7 +128,6 @@ export async function createTerminalSession(opts: {
     command?: string[];
     env?: string[];
     kind?: TerminalKind;
-    consoleSessionName?: string;
 }): Promise<{ sessionId: string }> {
     pruneTerminalSessions();
 
@@ -164,8 +140,8 @@ export async function createTerminalSession(opts: {
     const sessionId = crypto.randomUUID();
     const { serverId, containerId } = opts;
 
-    const workdir = opts.workdir ?? '/data';
-    const cmd = opts.command ?? ['bash', '-lc', `cd ${workdir} && exec bash`];
+    const workdir = opts.workdir;
+    const cmd = opts.command ?? ['/bin/sh', '-c', 'if command -v bash >/dev/null 2>&1; then exec bash -l; else exec sh; fi'];
 
     const container = docker.getContainer(containerId);
 
@@ -175,8 +151,8 @@ export async function createTerminalSession(opts: {
         AttachStdout: true,
         AttachStderr: true,
         Tty: true,
-        User: opts.user ?? 'linuxgsm',
-        WorkingDir: workdir,
+        ...(opts.user ? { User: opts.user } : {}),
+        ...(workdir ? { WorkingDir: workdir } : {}),
         Env: ['TERM=xterm-256color', ...(opts.env ?? [])],
     });
 
@@ -191,7 +167,6 @@ export async function createTerminalSession(opts: {
         serverId,
         containerId,
         ownerUserId: opts.ownerUserId,
-        consoleSessionName: kind === 'console' ? sanitizeSessionName(opts.consoleSessionName) : undefined,
 
         execId: exec.id,
         exec,
@@ -282,9 +257,6 @@ export function writeToTerminal(sessionId: string, data: Buffer): void {
     flush();
 }
 
-/**
- * Subscribes to terminal output. Automatically strips Docker mux headers if present.
- */
 export function onTerminalData(sessionId: string, cb: (chunk: Buffer) => void): (() => void) {
     const s = SESSIONS.get(sessionId);
     if (!s?.stream) throw new Error('Unknown session');
@@ -298,80 +270,4 @@ export function onTerminalData(sessionId: string, cb: (chunk: Buffer) => void): 
             // Ignore cleanup errors.
         }
     };
-}
-
-async function runContainerCommand(
-    containerId: string,
-    command: string[],
-    opts?: { user?: string; workdir?: string; tty?: boolean }
-): Promise<Buffer> {
-    const container = docker.getContainer(containerId);
-    const exec = await container.exec({
-        Cmd: command,
-        AttachStdout: true,
-        AttachStderr: true,
-        Tty: opts?.tty ?? true,
-        User: opts?.user ?? 'linuxgsm',
-        WorkingDir: opts?.workdir ?? '/data',
-        Env: ['TERM=xterm-256color'],
-    });
-
-    const stream = await exec.start({ hijack: true, stdin: false });
-    const chunks: Buffer[] = [];
-
-    await new Promise<void>((resolve) => {
-        stream.on('data', (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
-        stream.on('end', resolve);
-        stream.on('close', resolve);
-        stream.on('error', resolve);
-    });
-
-    return Buffer.concat(chunks);
-}
-
-export async function captureConsoleSessionScrollback(
-    sessionId: string,
-    opts?: { maxLines?: number; maxBytes?: number }
-): Promise<Buffer> {
-    const session = SESSIONS.get(sessionId);
-    if (!session || session.kind !== 'console') return Buffer.alloc(0);
-
-    const safeSession = sanitizeSessionName(session.consoleSessionName);
-    if (!safeSession) return Buffer.alloc(0);
-
-    const safeSessionRegex = escapeRegex(safeSession);
-    const maxLines = Math.min(Math.max(Math.floor(opts?.maxLines ?? 1200), 100), 5000);
-    const maxBytes = Math.min(Math.max(Math.floor(opts?.maxBytes ?? 256 * 1024), 16 * 1024), 1024 * 1024);
-
-    const command = [
-        'bash',
-        '-lc',
-        `
-set +e
-uid="$(id -u)"
-dir="/tmp/tmux-$uid"
-SESSION="${safeSession}"
-
-if [ -z "$SESSION" ] || [ ! -d "$dir" ]; then
-  exit 0
-fi
-
-sock="$(ls -1 "$dir" 2>/dev/null | grep -E "^${safeSessionRegex}-" | head -n 1 || true)"
-if [ -z "$sock" ]; then
-  exit 0
-fi
-
-tmux -L "$sock" has-session -t "$SESSION" >/dev/null 2>&1 || exit 0
-tmux -L "$sock" capture-pane -p -t "$SESSION" -S -${maxLines} 2>/dev/null || true
-        `.trim(),
-    ];
-
-    const raw = await runContainerCommand(session.containerId, command, {
-        user: 'linuxgsm',
-        workdir: '/data',
-        tty: true,
-    });
-
-    if (raw.length <= maxBytes) return raw;
-    return raw.subarray(raw.length - maxBytes);
 }

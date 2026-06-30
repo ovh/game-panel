@@ -1,5 +1,5 @@
 import { serverRepository } from '../database/index.js';
-import type { ServerStatus } from '../types/gameServer.js';
+import type { ContainerStatus, HealthStatus, ServerStatus } from '../types/gameServer.js';
 import type { ContainerHealthStatus, ContainerRuntimeState } from '../utils/docker/containers.js';
 import { inspectContainerRuntime } from '../utils/docker.js';
 import { logError } from '../utils/logger.js';
@@ -9,7 +9,7 @@ type TransitionStatus = Extract<
     'installing' | 'starting' | 'stopping' | 'restarting'
 >;
 
-type TransitionTimeoutBehavior = 'reconcile' | 'set_stopped';
+type TransitionTimeoutBehavior = 'reconcile';
 
 interface ActiveServerTransition {
     status: TransitionStatus;
@@ -76,11 +76,6 @@ async function handleTransitionTimeout(serverId: number): Promise<void> {
     clearTransitionHandles(serverId);
 
     try {
-        if (transition.timeoutBehavior === 'set_stopped') {
-            await serverRepository.updateStatusIfChanged(serverId, 'stopped');
-            return;
-        }
-
         await reconcileServerStatus(serverId);
     } catch (error) {
         logError('SERVICE:SERVER_TRANSITION:TIMEOUT', error, {
@@ -167,7 +162,7 @@ export function clearServerTransition(serverId: number): void {
 
 export async function completeServerTransition(
     serverId: number,
-    finalStatus: Extract<ServerStatus, 'running' | 'stopped'>
+    finalStatus: Extract<ServerStatus, 'running' | 'stopped' | 'unhealthy'>
 ): Promise<void> {
     clearTransitionHandles(serverId);
     await serverRepository.updateStatusIfChanged(serverId, finalStatus);
@@ -193,24 +188,43 @@ export function shouldIgnoreDockerHealthStatus(
 }
 
 export function mapDockerHealthToServerStatus(
-    currentStatus: ServerStatus,
+    _currentStatus: ServerStatus,
     healthStatus: ContainerHealthStatus
 ): ServerStatus {
     if (healthStatus === 'healthy') {
         return 'running';
     }
 
-    if (
-        healthStatus === 'starting' &&
-        (currentStatus === 'installing' || currentStatus === 'starting' || currentStatus === 'restarting')
-    ) {
-        return currentStatus;
+    return 'unhealthy';
+}
+
+function mapRuntimeToServerStatus(params: {
+    currentStatus: ServerStatus;
+    containerStatus: ContainerStatus;
+    healthStatus: HealthStatus;
+    activeTransitionStatus: TransitionStatus | null;
+}): ServerStatus {
+    if (params.containerStatus !== 'running') {
+        return 'stopped';
     }
 
-    return 'stopped';
+    if (params.healthStatus === 'healthy' || params.healthStatus === 'none') {
+        return 'running';
+    }
+
+    if (
+        params.healthStatus === 'starting' &&
+        params.activeTransitionStatus &&
+        params.currentStatus === params.activeTransitionStatus
+    ) {
+        return params.currentStatus;
+    }
+
+    return 'unhealthy';
 }
 
 export async function reconcileServerStatus(serverId: number): Promise<ServerStatus | null> {
+    const activeTransitionStatus = activeTransitions.get(serverId)?.status ?? null;
     clearTransitionHandles(serverId);
 
     const server = await serverRepository.findById(serverId);
@@ -218,26 +232,27 @@ export async function reconcileServerStatus(serverId: number): Promise<ServerSta
 
     const runtime = await inspectServerRuntime(serverId);
 
-    let nextStatus: ServerStatus = 'stopped';
-
-    if (runtime?.containerStatus === 'running') {
-        if (runtime.healthStatus === 'healthy') {
-            nextStatus = 'running';
-        } else if (
-            runtime.healthStatus === 'starting' &&
-            (server.status === 'installing' || server.status === 'starting' || server.status === 'restarting')
-        ) {
-            nextStatus = server.status;
-        } else if (runtime.healthStatus === null) {
-            nextStatus =
-                server.status === 'running' || server.status === 'stopping'
-                    ? 'running'
-                    : 'stopped';
-        } else {
-            nextStatus = 'stopped';
-        }
+    if (!runtime) {
+        const nextStatus: ServerStatus = 'stopped';
+        await serverRepository.updateRuntimeAndStatusIfChanged(serverId, {
+            status: nextStatus,
+            containerStatus: 'missing',
+            healthStatus: 'none',
+        });
+        return nextStatus;
     }
 
-    await serverRepository.updateStatusIfChanged(serverId, nextStatus);
+    const nextStatus = mapRuntimeToServerStatus({
+        currentStatus: server.status,
+        containerStatus: runtime.containerStatus,
+        healthStatus: runtime.healthStatus,
+        activeTransitionStatus,
+    });
+
+    await serverRepository.updateRuntimeAndStatusIfChanged(serverId, {
+        status: nextStatus,
+        containerStatus: runtime.containerStatus,
+        healthStatus: runtime.healthStatus,
+    });
     return nextStatus;
 }

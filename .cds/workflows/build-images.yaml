@@ -1,0 +1,374 @@
+name: game-panel-images-build
+
+on: [push]
+
+repository:
+  vcs: stash_ovh_net
+  name: squad-game/game-panel
+
+integrations:
+  - artifactory-squad-game-cicd
+
+jobs:
+  build-app:
+    runs-on: library/default-vm
+
+    steps:
+      - id: checkout
+        uses: actions/checkout
+
+      - id: docker-version
+        run: |-
+          #!/bin/bash
+          set -euo pipefail
+
+          docker version
+
+      - id: build-backend
+        run: |-
+          #!/bin/bash
+          set -euo pipefail
+
+          docker build \
+            --platform linux/amd64 \
+            --target build \
+            -f backend/Dockerfile \
+            -t game-panel/backend-build-check:${{ git.sha_short }} \
+            .
+
+      - id: build-frontend
+        run: |-
+          #!/bin/bash
+          set -euo pipefail
+
+          docker build \
+            --platform linux/amd64 \
+            --target build \
+            --build-arg VITE_DB_API_BASE_URL=https://example.invalid \
+            -f frontend/Dockerfile \
+            -t game-panel/frontend-build-check:${{ git.sha_short }} \
+            .
+
+  build-images:
+    needs:
+      - build-app
+    runs-on: library/default-vm
+
+    steps:
+      - id: checkout
+        uses: actions/checkout
+
+      - id: docker-version
+        run: |-
+          #!/bin/bash
+          set -euo pipefail
+
+          docker version
+
+      - id: debug-version
+        run: |-
+          #!/bin/bash
+          set -euo pipefail
+
+          echo "cds.version=${{ cds.version }}"
+          echo "git.ref=${{ git.ref }}"
+          echo "git.ref_name=${{ git.ref_name }}"
+          echo "git.ref_type=${{ git.ref_type }}"
+          echo "git.sha=${{ git.sha }}"
+          echo "git.sha_short=${{ git.sha_short }}"
+          echo "git.repository_web_url=${{ git.repository_web_url }}"
+
+      - id: build-images
+        run: |-
+          #!/bin/bash
+          set -euo pipefail
+
+          IMAGE_NAMESPACE="game-panel"
+
+          IMAGE_CREATED="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          IMAGE_VERSION="${{ cds.version }}"
+          IMAGE_REVISION="${{ git.sha }}"
+          IMAGE_SOURCE="${{ git.repository_web_url }}"
+
+          echo "IMAGE_NAMESPACE=${IMAGE_NAMESPACE}"
+          echo "IMAGE_VERSION=${IMAGE_VERSION}"
+          echo "IMAGE_CREATED=${IMAGE_CREATED}"
+          echo "IMAGE_REVISION=${IMAGE_REVISION}"
+          echo "IMAGE_SOURCE=${IMAGE_SOURCE}"
+
+          build_image() {
+            local image="$1"
+            local context="$2"
+            local dockerfile="$3"
+            shift 3
+
+            echo "========================================"
+            echo "Building image: ${IMAGE_NAMESPACE}/${image}:${IMAGE_VERSION}"
+            echo "Context: ${context}"
+            echo "Dockerfile: ${dockerfile}"
+            echo "Extra args: $*"
+            echo "========================================"
+
+            docker build \
+              --platform linux/amd64 \
+              --build-arg IMAGE_CREATED="${IMAGE_CREATED}" \
+              --build-arg IMAGE_REVISION="${IMAGE_REVISION}" \
+              --build-arg IMAGE_VERSION="${IMAGE_VERSION}" \
+              --build-arg IMAGE_SOURCE="${IMAGE_SOURCE}" \
+              "$@" \
+              -f "${dockerfile}" \
+              -t "${IMAGE_NAMESPACE}/${image}:${IMAGE_VERSION}" \
+              "${context}"
+          }
+
+          build_image \
+            "gamepanel-counter-strike-2" \
+            "docker-images/counter-strike/2" \
+            "docker-images/counter-strike/2/Dockerfile"
+
+          build_image \
+            "gamepanel-hytale-java25" \
+            "docker-images/hytale" \
+            "docker-images/hytale/Dockerfile"
+
+          build_image \
+            "gamepanel-updater" \
+            "." \
+            "docker-images/gamepanel/updater/Dockerfile"
+
+          build_image \
+            "gamepanel-minecraft-java-edition-java25" \
+            "docker-images/minecraft/java-edition" \
+            "docker-images/minecraft/java-edition/vanilla/Dockerfile" \
+            --build-arg JAVA_VERSION=25
+
+          build_image \
+            "gamepanel-minecraft-java-edition-java21" \
+            "docker-images/minecraft/java-edition" \
+            "docker-images/minecraft/java-edition/vanilla/Dockerfile" \
+            --build-arg JAVA_VERSION=21
+
+          build_image \
+            "gamepanel-minecraft-java-edition-java17" \
+            "docker-images/minecraft/java-edition" \
+            "docker-images/minecraft/java-edition/vanilla/Dockerfile" \
+            --build-arg JAVA_VERSION=17
+
+          build_image \
+            "gamepanel-minecraft-java-edition-java8" \
+            "docker-images/minecraft/java-edition" \
+            "docker-images/minecraft/java-edition/vanilla/Dockerfile" \
+            --build-arg JAVA_VERSION=8
+
+          build_image \
+            "gamepanel-minecraft-paper-java25" \
+            "docker-images/minecraft/java-edition" \
+            "docker-images/minecraft/java-edition/paper/Dockerfile" \
+            --build-arg JAVA_VERSION=25
+
+          build_image \
+            "gamepanel-minecraft-paper-java21" \
+            "docker-images/minecraft/java-edition" \
+            "docker-images/minecraft/java-edition/paper/Dockerfile" \
+            --build-arg JAVA_VERSION=21
+
+          build_image \
+            "gamepanel-minecraft-paper-java17" \
+            "docker-images/minecraft/java-edition" \
+            "docker-images/minecraft/java-edition/paper/Dockerfile" \
+            --build-arg JAVA_VERSION=17
+
+          build_image \
+            "gamepanel-minecraft-paper-java8" \
+            "docker-images/minecraft/java-edition" \
+            "docker-images/minecraft/java-edition/paper/Dockerfile" \
+            --build-arg JAVA_VERSION=8
+
+          build_image \
+            "gamepanel-minecraft-fabric-java25" \
+            "docker-images/minecraft/java-edition" \
+            "docker-images/minecraft/java-edition/fabric/Dockerfile" \
+            --build-arg JAVA_VERSION=25
+
+          build_image \
+            "gamepanel-minecraft-fabric-java21" \
+            "docker-images/minecraft/java-edition" \
+            "docker-images/minecraft/java-edition/fabric/Dockerfile" \
+            --build-arg JAVA_VERSION=21
+
+          build_image \
+            "gamepanel-minecraft-fabric-java17" \
+            "docker-images/minecraft/java-edition" \
+            "docker-images/minecraft/java-edition/fabric/Dockerfile" \
+            --build-arg JAVA_VERSION=17
+
+          build_image \
+            "gamepanel-minecraft-fabric-java8" \
+            "docker-images/minecraft/java-edition" \
+            "docker-images/minecraft/java-edition/fabric/Dockerfile" \
+            --build-arg JAVA_VERSION=8
+
+          build_image \
+            "gamepanel-minecraft-neoforge-java25" \
+            "docker-images/minecraft/java-edition" \
+            "docker-images/minecraft/java-edition/neoforge/Dockerfile" \
+            --build-arg JAVA_VERSION=25
+
+          build_image \
+            "gamepanel-minecraft-neoforge-java21" \
+            "docker-images/minecraft/java-edition" \
+            "docker-images/minecraft/java-edition/neoforge/Dockerfile" \
+            --build-arg JAVA_VERSION=21
+
+          build_image \
+            "gamepanel-minecraft-neoforge-java17" \
+            "docker-images/minecraft/java-edition" \
+            "docker-images/minecraft/java-edition/neoforge/Dockerfile" \
+            --build-arg JAVA_VERSION=17
+
+          build_image \
+            "gamepanel-minecraft-neoforge-java8" \
+            "docker-images/minecraft/java-edition" \
+            "docker-images/minecraft/java-edition/neoforge/Dockerfile" \
+            --build-arg JAVA_VERSION=8
+
+          build_image \
+            "gamepanel-minecraft-bedrock-edition" \
+            "docker-images/minecraft/bedrock-edition" \
+            "docker-images/minecraft/bedrock-edition/Dockerfile"
+
+      - id: push-gamepanel-counter-strike-2
+        uses: actions/dockerPush
+        with:
+          image: game-panel/gamepanel-counter-strike-2:${{ cds.version }}
+          tags: "${{ cds.version }}"
+
+      - id: push-gamepanel-hytale-java25
+        uses: actions/dockerPush
+        with:
+          image: game-panel/gamepanel-hytale-java25:${{ cds.version }}
+          tags: "${{ cds.version }}"
+
+      - id: push-gamepanel-updater
+        uses: actions/dockerPush
+        with:
+          image: game-panel/gamepanel-updater:${{ cds.version }}
+          tags: "${{ cds.version }}"
+
+      - id: push-gamepanel-minecraft-java-edition-java25
+        uses: actions/dockerPush
+        with:
+          image: game-panel/gamepanel-minecraft-java-edition-java25:${{ cds.version }}
+          tags: "${{ cds.version }}"
+
+      - id: push-gamepanel-minecraft-java-edition-java21
+        uses: actions/dockerPush
+        with:
+          image: game-panel/gamepanel-minecraft-java-edition-java21:${{ cds.version }}
+          tags: "${{ cds.version }}"
+
+      - id: push-gamepanel-minecraft-java-edition-java17
+        uses: actions/dockerPush
+        with:
+          image: game-panel/gamepanel-minecraft-java-edition-java17:${{ cds.version }}
+          tags: "${{ cds.version }}"
+
+      - id: push-gamepanel-minecraft-java-edition-java8
+        uses: actions/dockerPush
+        with:
+          image: game-panel/gamepanel-minecraft-java-edition-java8:${{ cds.version }}
+          tags: "${{ cds.version }}"
+
+      - id: push-gamepanel-minecraft-paper-java25
+        uses: actions/dockerPush
+        with:
+          image: game-panel/gamepanel-minecraft-paper-java25:${{ cds.version }}
+          tags: "${{ cds.version }}"
+
+      - id: push-gamepanel-minecraft-paper-java21
+        uses: actions/dockerPush
+        with:
+          image: game-panel/gamepanel-minecraft-paper-java21:${{ cds.version }}
+          tags: "${{ cds.version }}"
+
+      - id: push-gamepanel-minecraft-paper-java17
+        uses: actions/dockerPush
+        with:
+          image: game-panel/gamepanel-minecraft-paper-java17:${{ cds.version }}
+          tags: "${{ cds.version }}"
+
+      - id: push-gamepanel-minecraft-paper-java8
+        uses: actions/dockerPush
+        with:
+          image: game-panel/gamepanel-minecraft-paper-java8:${{ cds.version }}
+          tags: "${{ cds.version }}"
+
+      - id: push-gamepanel-minecraft-fabric-java25
+        uses: actions/dockerPush
+        with:
+          image: game-panel/gamepanel-minecraft-fabric-java25:${{ cds.version }}
+          tags: "${{ cds.version }}"
+
+      - id: push-gamepanel-minecraft-fabric-java21
+        uses: actions/dockerPush
+        with:
+          image: game-panel/gamepanel-minecraft-fabric-java21:${{ cds.version }}
+          tags: "${{ cds.version }}"
+
+      - id: push-gamepanel-minecraft-fabric-java17
+        uses: actions/dockerPush
+        with:
+          image: game-panel/gamepanel-minecraft-fabric-java17:${{ cds.version }}
+          tags: "${{ cds.version }}"
+
+      - id: push-gamepanel-minecraft-fabric-java8
+        uses: actions/dockerPush
+        with:
+          image: game-panel/gamepanel-minecraft-fabric-java8:${{ cds.version }}
+          tags: "${{ cds.version }}"
+
+      - id: push-gamepanel-minecraft-neoforge-java25
+        uses: actions/dockerPush
+        with:
+          image: game-panel/gamepanel-minecraft-neoforge-java25:${{ cds.version }}
+          tags: "${{ cds.version }}"
+
+      - id: push-gamepanel-minecraft-neoforge-java21
+        uses: actions/dockerPush
+        with:
+          image: game-panel/gamepanel-minecraft-neoforge-java21:${{ cds.version }}
+          tags: "${{ cds.version }}"
+
+      - id: push-gamepanel-minecraft-neoforge-java17
+        uses: actions/dockerPush
+        with:
+          image: game-panel/gamepanel-minecraft-neoforge-java17:${{ cds.version }}
+          tags: "${{ cds.version }}"
+
+      - id: push-gamepanel-minecraft-neoforge-java8
+        uses: actions/dockerPush
+        with:
+          image: game-panel/gamepanel-minecraft-neoforge-java8:${{ cds.version }}
+          tags: "${{ cds.version }}"
+
+      - id: push-gamepanel-minecraft-bedrock-edition
+        uses: actions/dockerPush
+        with:
+          image: game-panel/gamepanel-minecraft-bedrock-edition:${{ cds.version }}
+          tags: "${{ cds.version }}"
+
+  release-artifactory:
+    needs:
+      - build-images
+    if: "${{ git.ref_type == 'tag' && success() }}"
+    runs-on:
+      model: library/default-container
+
+    steps:
+      - id: release-artifactory
+        uses: actions/artifactoryRelease
+        with:
+          artifacts: "**"
+          releaseNotes: "Game Panel images ${{ cds.version }}"
+        integrations:
+          - artifactory-squad-game-cicd

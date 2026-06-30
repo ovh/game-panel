@@ -43,7 +43,9 @@ export function useCliMessages() {
         server,
         action,
       };
-      console.log('[CLI]', { timestamp: newMessage.timestamp, type, server, action, message });
+      if (import.meta.env.DEV) {
+        console.log('[CLI]', { timestamp: newMessage.timestamp, type, server, action, message });
+      }
       setCliMessages((prev) => [...prev, newMessage]);
     },
     []

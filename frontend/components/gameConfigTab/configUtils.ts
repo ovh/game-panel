@@ -382,7 +382,7 @@ export const parseDbConfigFiles = (value: unknown): DbConfigFileDefinition[] => 
 export const uniquePaths = (paths: string[]): string[] => Array.from(new Set(paths));
 
 const resolveKeyValueRuntimeOptions = (
-  format: Extract<ConfigWriteFormat, 'manual' | 'ini' | 'properties' | 'cfg' | 'txt' | 'toml' | 'unknown'>,
+  _format: Extract<ConfigWriteFormat, 'manual' | 'ini' | 'properties' | 'cfg' | 'txt' | 'toml' | 'unknown'>,
   definition?: DbConfigFileFormatDefinition
 ): KeyValueFormatRuntimeOptions => {
   return {

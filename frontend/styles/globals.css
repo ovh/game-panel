@@ -12,20 +12,20 @@
   --color-cyan-500: var(--color-cyan-400);
   --color-cyan-700: var(--color-cyan-400);
   --color-cyan-950: var(--color-cyan-400);
-  --font-size: 16px;
+  --font-size: 17px;
   --background: #e8edf3;
   --foreground: #1a1d29;
   --card: #ffffff;
   --card-foreground: #1a1d29;
   --popover: #ffffff;
   --popover-foreground: #1a1d29;
-  --primary: #08119e;
+  --primary: #000e9c;
   --primary-foreground: #ffffff;
   --secondary: #e0e7ff;
-  --secondary-foreground: #08119e;
+  --secondary-foreground: #000e9c;
   --muted: #f0f4f8;
   --muted-foreground: #4a5568;
-  --accent: #0050d5;
+  --accent: #000e9c;
   --accent-foreground: #ffffff;
   --destructive: #d4183d;
   --destructive-foreground: #ffffff;
@@ -35,25 +35,48 @@
   --switch-background: #cbd5e0;
   --font-weight-medium: 500;
   --font-weight-normal: 400;
-  --ring: #0050d5;
-  --chart-1: #0050d5;
+  --ring: #000e9c;
+  --chart-1: #000e9c;
   --chart-2: #00b8d4;
   --chart-3: #22c55e;
   --chart-4: #f59e0b;
   --chart-5: #8b5cf6;
   --radius: 0.625rem;
-  --sidebar: #08119e;
+  --sidebar: #000e9c;
   --sidebar-foreground: #ffffff;
   --sidebar-primary: #ffffff;
-  --sidebar-primary-foreground: #08119e;
-  --sidebar-accent: #060d7a;
+  --sidebar-primary-foreground: #000e9c;
+  --sidebar-accent: #000b82;
   --sidebar-accent-foreground: #ffffff;
-  --sidebar-border: #060d7a;
-  --sidebar-ring: #0050d5;
+  --sidebar-border: #000b82;
+  --sidebar-ring: #000e9c;
+
+  /* Light-mode text tokens (dark text for light surfaces) */
+  --gp-text-white: #0f172a;
+  --gp-text-gray-100: #0f172a;
+  --gp-text-gray-200: #1e293b;
+  --gp-text-gray-300: #334155;
+  --gp-text-gray-400: #475569;
+  --gp-text-gray-500: #64748b;
+  --gp-text-slate-200: #475569;
+  --gp-text-slate-300: #475569;
+  --gp-text-slate-400: #64748b;
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
+  --gp-global-gradient: none;
+  --background: #0f172a;
+
+  /* Dark-mode text tokens (original Tailwind values) */
+  --gp-text-white: #e6edf7;
+  --gp-text-gray-100: #f3f4f6;
+  --gp-text-gray-200: #e5e7eb;
+  --gp-text-gray-300: #d1d5db;
+  --gp-text-gray-400: #9ca3af;
+  --gp-text-gray-500: #6b7280;
+  --gp-text-slate-200: #e2e8f0;
+  --gp-text-slate-300: #cbd5e1;
+  --gp-text-slate-400: #94a3b8;
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.145 0 0);
   --card-foreground: oklch(0.985 0 0);
@@ -389,13 +412,30 @@ html {
   font-size: var(--font-size);
   font-family: var(--ods-font-family-default), 'Source Sans Pro', 'Trebuchet MS', arial, 'Segoe UI',
     sans-serif;
+  /* Disable double-tap-to-zoom on touch devices (viewport meta blocks pinch zoom) */
+  touch-action: manipulation;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 @layer utilities {
-  /* Global white-text softening to reduce glare on dark surfaces */
-  .text-white {
-    color: #e6edf7 !important;
-  }
+  /*
+   * Text utilities bound to CSS variables — automatically adapt to light/dark.
+   * Dark mode: original TW values. Light mode: OVHcloud-readable dark values.
+   * Accent backgrounds locally override these vars to keep white text.
+   */
+  .text-white                    { color: var(--gp-text-white) !important; }
+  .text-gray-100                 { color: var(--gp-text-gray-100) !important; }
+  .text-gray-200                 { color: var(--gp-text-gray-200) !important; }
+  .text-gray-300                 { color: var(--gp-text-gray-300) !important; }
+  .text-gray-400                 { color: var(--gp-text-gray-400) !important; }
+  .text-gray-500                 { color: var(--gp-text-gray-500) !important; }
+  .text-slate-200                { color: var(--gp-text-slate-200) !important; }
+  .text-slate-300                { color: var(--gp-text-slate-300) !important; }
+  .text-slate-400                { color: var(--gp-text-slate-400) !important; }
+  .hover\:text-white:hover       { color: var(--gp-text-white) !important; }
+  .hover\:text-gray-200:hover    { color: var(--gp-text-gray-200) !important; }
+  .hover\:text-gray-300:hover    { color: var(--gp-text-gray-300) !important; }
 
   .gp-page-layout {
     background: transparent;
@@ -458,4 +498,1008 @@ html {
 
 .gp-log-prompt-toast-icon {
   animation: gp-log-prompt-toast-icon-pop 360ms cubic-bezier(0.22, 0.9, 0.24, 1);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   LIGHT MODE — OVHcloud / Espace Client
+   Complete override layer. Dark mode is untouched.
+   ═══════════════════════════════════════════════════════════════ */
+
+html:not(.dark) {
+  --gp-global-gradient: linear-gradient(160deg, #eef3fb 0%, #e6edf8 50%, #dce6f5 100%);
+  --color-cyan-400: #000e9c;
+  /* Override ODS accent to use the correct OVHcloud blue */
+  --gp-ods-accent-primary: #000e9c;
+  --gp-ods-accent-secondary: #002dbe;
+  --gp-tab-active-text: #ffffff;
+}
+
+/* ─────────────────────────────────────────────────────
+   SCROLLBARS
+   ───────────────────────────────────────────────────── */
+
+html:not(.dark) *,
+html:not(.dark) .modal-scrollbar-dark {
+  scrollbar-color: rgba(148, 163, 184, 0.4) transparent;
+}
+html:not(.dark) *::-webkit-scrollbar-track,
+html:not(.dark) .modal-scrollbar-dark::-webkit-scrollbar-track { background: transparent; }
+html:not(.dark) *::-webkit-scrollbar-thumb,
+html:not(.dark) .modal-scrollbar-dark::-webkit-scrollbar-thumb { background: rgba(148,163,184,0.4); border: 2px solid transparent; }
+html:not(.dark) *::-webkit-scrollbar-thumb:hover,
+html:not(.dark) .modal-scrollbar-dark::-webkit-scrollbar-thumb:hover { background: rgba(100,116,139,0.55); }
+
+html:not(.dark) input.prevent-autofill:-webkit-autofill,
+html:not(.dark) input.prevent-autofill:-webkit-autofill:hover,
+html:not(.dark) input.prevent-autofill:-webkit-autofill:focus {
+  -webkit-text-fill-color: #0f172a;
+  caret-color: #0f172a;
+  -webkit-box-shadow: 0 0 0 1000px #ffffff inset;
+  box-shadow: 0 0 0 1000px #ffffff inset;
+}
+
+/* ─────────────────────────────────────────────────────
+   SURFACE UTILITY CLASSES
+   ───────────────────────────────────────────────────── */
+
+html:not(.dark) .bg-gp-surface-base     { background-color: #f0f4fb !important; }
+html:not(.dark) .bg-gp-surface-card     { background-color: #ffffff !important; }
+html:not(.dark) .bg-gp-surface-elevated { background-color: #f4f7fc !important; }
+html:not(.dark) .bg-gp-surface-input    { background-color: #edf2fb !important; }
+html:not(.dark) .bg-gp-surface-overlay  { background-color: #e8edf8 !important; }
+
+/* ─────────────────────────────────────────────────────
+   CARDS & MAIN PANELS (depth system)
+   ───────────────────────────────────────────────────── */
+
+html:not(.dark) .gp-app-card[data-ods='card'] {
+  background: #ffffff !important;
+  border: 1px solid #d0ddf0 !important;
+  box-shadow:
+    0 1px 3px rgba(10, 30, 80, 0.07),
+    0 4px 16px rgba(10, 30, 80, 0.08),
+    0 1px 0 rgba(255,255,255,0.9) inset !important;
+  color: #1e293b !important;
+}
+
+/* Shadow overrides — convert dark shadows to light equivalents */
+html:not(.dark) .shadow-\[0_4px_20px_rgba\(2\,6\,23\,0\.5\)\,0_1px_4px_rgba\(2\,6\,23\,0\.3\)\],
+html:not(.dark) .shadow-\[0_4px_24px_rgba\(2\,6\,23\,0\.55\)\,0_1px_4px_rgba\(2\,6\,23\,0\.3\)\],
+html:not(.dark) .shadow-\[0_4px_20px_rgba\(2\,6\,23\,0\.5\)\,0_1px_4px_rgba\(2\,6\,23\,0\.25\)\] {
+  box-shadow:
+    0 1px 3px rgba(10, 30, 80, 0.07),
+    0 4px 16px rgba(10, 30, 80, 0.09),
+    0 0 0 1px rgba(0, 80, 215, 0.05) inset !important;
+}
+
+/* ─────────────────────────────────────────────────────
+   SIDEBAR
+   ───────────────────────────────────────────────────── */
+
+html:not(.dark) aside {
+  border-right-color: #c5d5ea !important;
+  box-shadow: 2px 0 16px rgba(10, 30, 80, 0.09) !important;
+}
+
+/* ─────────────────────────────────────────────────────
+   ODS MODAL CONTENT
+   ───────────────────────────────────────────────────── */
+
+html:not(.dark) .gp-app-modal-content[data-ods='modal-content'] {
+  background: #ffffff !important;
+  border-color: #c8d8ee !important;
+  box-shadow:
+    0 0 0 1px rgba(0, 80, 215, 0.08) inset,
+    0 20px 60px rgba(10, 30, 80, 0.18),
+    0 4px 16px rgba(10, 30, 80, 0.1) !important;
+  color: #1e293b !important;
+}
+
+/* ─────────────────────────────────────────────────────
+   ODS TABLE
+   ───────────────────────────────────────────────────── */
+
+html:not(.dark) .gp-app-table[data-ods='table'] {
+  --ods-table-border-color: #d8e6f5 !important;
+}
+html:not(.dark) .gp-app-table[data-ods='table'] th,
+html:not(.dark) .gp-app-table[data-ods='table'] thead tr th {
+  background: #edf2fb !important;
+  color: #4a6890 !important;
+  border-color: #d0ddf0 !important;
+  border-bottom: 2px solid #c5d5ea !important;
+}
+html:not(.dark) .gp-app-table[data-ods='table'] tbody tr td,
+html:not(.dark) .gp-app-table[data-ods='table'] tbody tr th {
+  background: transparent !important;
+  border-color: #e4ecf7 !important;
+  color: #1e3a5c !important;
+}
+html:not(.dark) .gp-app-table[data-ods='table'] tbody tr:nth-child(even) td,
+html:not(.dark) .gp-app-table[data-ods='table'] tbody tr:nth-child(even) th {
+  background: rgba(0, 80, 215, 0.025) !important;
+}
+html:not(.dark) .gp-app-table[data-ods='table'] tr:hover {
+  background: rgba(0, 80, 215, 0.06) !important;
+  box-shadow: inset 3px 0 0 #000e9c !important;
+}
+html:not(.dark) .gp-app-table[data-ods='table'] tr.gp-add-server-row:hover {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+/* ─────────────────────────────────────────────────────
+   ODS INPUTS / SELECTS / FORMS
+   ───────────────────────────────────────────────────── */
+
+html:not(.dark) .gp-app-input[data-ods='input'],
+html:not(.dark) .gp-app-textarea[data-ods='textarea'] {
+  background: #ffffff !important;
+  border-color: #c5d5ea !important;
+  color: #1e293b !important;
+}
+html:not(.dark) .gp-app-select-control[data-ods='select-control'] {
+  background: #ffffff !important;
+  border-color: #c5d5ea !important;
+  color: #1e293b !important;
+}
+html:not(.dark) .gp-resources-select[data-ods='select'] .gp-app-select-control[data-ods='select-control'],
+html:not(.dark) .gp-game-config-select[data-ods='select'] .gp-app-select-control[data-ods='select-control'] {
+  background: #ffffff !important;
+  border-color: #c5d5ea !important;
+}
+html:not(.dark) .gp-app-select[data-ods='select'] [data-ods='select-content'] {
+  background: #ffffff !important;
+  border-color: #c8d8ee !important;
+  box-shadow: 0 10px 24px rgba(10, 30, 80, 0.14) !important;
+}
+html:not(.dark) .gp-app-select[data-ods='select'] [data-ods='select-content'] [role='option'] {
+  color: #1e293b !important;
+}
+html:not(.dark) .gp-app-select[data-ods='select'] [data-ods='select-content'] [role='option'][data-highlighted] {
+  background: #edf2fb !important;
+}
+/* Resources "Filter by Category" — stronger contrast in light mode */
+html:not(.dark) .gp-resources-select[data-ods='select'] .gp-app-select-control[data-ods='select-control'] {
+  border: 1px solid #94a3b8 !important;
+  border-radius: 0.5rem !important;
+  color: #0f172a !important;
+}
+html:not(.dark) .gp-resources-select[data-ods='select'] .gp-app-select-control[data-ods='select-control']:hover {
+  border: 1px solid #64748b !important;
+}
+html:not(.dark) .gp-resources-select[data-ods='select'] .gp-app-select-control[data-ods='select-control'] [class*='select-value'] {
+  color: #0f172a !important;
+}
+
+/* ─────────────────────────────────────────────────────
+   ODS BADGES — status
+   ───────────────────────────────────────────────────── */
+
+html:not(.dark) .gp-status-badge--online[data-ods='badge'],
+html:not(.dark) .gp-status-badge--healthy[data-ods='badge'],
+html:not(.dark) .gp-status-badge--enabled[data-ods='badge'] {
+  background: rgba(22, 163, 74, 0.12) !important;
+  color: #15803d !important;
+}
+html:not(.dark) .gp-status-badge--offline[data-ods='badge'],
+html:not(.dark) .gp-status-badge--disabled[data-ods='badge'] {
+  background: rgba(100, 116, 139, 0.12) !important;
+  color: #475569 !important;
+}
+html:not(.dark) .gp-status-badge--starting[data-ods='badge'],
+html:not(.dark) .gp-status-badge--restarting[data-ods='badge'],
+html:not(.dark) .gp-status-badge--info[data-ods='badge'] {
+  background: rgba(0, 80, 215, 0.1) !important;
+  color: #000e9c !important;
+}
+
+/* ─────────────────────────────────────────────────────
+   ODS TOGGLE
+   ───────────────────────────────────────────────────── */
+
+html:not(.dark) .gp-app-toggle-control[data-ods='toggle-control'] {
+  --ods-toggle-control-background-color: #cbd5e1;
+  --ods-toggle-control-background-color-hover: #94a3b8;
+  --ods-toggle-control-border-color: #94a3b8;
+  --ods-toggle-control-border-color-hover: #64748b;
+}
+html:not(.dark) .gp-app-toggle-label[data-ods='toggle-label'] {
+  color: #334155 !important;
+}
+
+/* ─────────────────────────────────────────────────────
+   ODS BUTTONS
+   ───────────────────────────────────────────────────── */
+
+html:not(.dark) .gp-app-button--neutral[data-ods='button'] {
+  background: #f1f5f9 !important;
+  border-color: #c5d5ea !important;
+  color: #1e3a5c !important;
+}
+html:not(.dark) .gp-app-button--neutral[data-ods='button']:hover {
+  background: #e4edf8 !important;
+  border-color: #000e9c !important;
+  color: #000e9c !important;
+}
+html:not(.dark) .gp-app-button--ghost[data-ods='button'] {
+  color: #334155 !important;
+}
+
+/* Quick-preset chips: the neutral-button override above flattens border/bg/text,
+   so the "active" cyan classes are invisible in light mode. Re-assert a clearly
+   visible blue ring on the applied preset (and the read-only "Custom" chip). */
+html:not(.dark) .gp-app-button--neutral.gp-preset-active[data-ods='button'],
+html:not(.dark) .gp-app-button--neutral.gp-preset-active[data-ods='button']:hover {
+  background: rgba(0, 80, 215, 0.10) !important;
+  border-color: #0050d7 !important;
+  color: #0050d7 !important;
+  box-shadow: 0 0 0 2px rgba(0, 80, 215, 0.35) !important;
+  font-weight: 700 !important;
+}
+
+/* ─────────────────────────────────────────────────────
+   MODAL OVERLAYS (bg-black/xx → translucent light)
+   ───────────────────────────────────────────────────── */
+
+html:not(.dark) .bg-black\/50 { background-color: rgba(100, 120, 160, 0.35) !important; }
+html:not(.dark) .bg-black\/60 { background-color: rgba(100, 120, 160, 0.40) !important; }
+html:not(.dark) .bg-black\/65 { background-color: rgba(100, 120, 160, 0.45) !important; }
+html:not(.dark) .bg-black\/70 { background-color: rgba(100, 120, 160, 0.50) !important; }
+
+/* ─────────────────────────────────────────────────────
+   INLINE MODALS (fixed inset-0 dialogs with dark bg)
+   ───────────────────────────────────────────────────── */
+
+/* Dark dialog containers (Dialog component from shadcn/radix) */
+html:not(.dark) [data-radix-dialog-content],
+html:not(.dark) [role='dialog'] {
+  background-color: #ffffff !important;
+  border-color: #c8d8ee !important;
+  color: #1e293b !important;
+  box-shadow:
+    0 20px 60px rgba(10, 30, 80, 0.20),
+    0 4px 16px rgba(10, 30, 80, 0.10) !important;
+}
+
+/* ─────────────────────────────────────────────────────
+   1) BACKGROUNDS: dark hex → OVHcloud light
+   ───────────────────────────────────────────────────── */
+
+/* Grays */
+html:not(.dark) .bg-gray-600  { background-color: #e2e8f0 !important; }
+html:not(.dark) .bg-gray-700  { background-color: #f0f4f8 !important; }
+html:not(.dark) .bg-gray-800  { background-color: #f5f7fa !important; }
+html:not(.dark) .bg-gray-900  { background-color: #f0f4f8 !important; }
+html:not(.dark) .hover\:bg-gray-600:hover { background-color: #d8e3ef !important; }
+html:not(.dark) .hover\:bg-gray-700:hover { background-color: #e9eef6 !important; }
+html:not(.dark) .hover\:bg-gray-800:hover { background-color: #f0f4f8 !important; }
+html:not(.dark) .bg-gray-700\/60  { background-color: rgba(226,232,240,0.6) !important; }
+html:not(.dark) .hover\:bg-gray-700\/60:hover { background-color: rgba(210,220,236,0.8) !important; }
+html:not(.dark) .bg-gray-900\/30  { background-color: rgba(203,213,225,0.25) !important; }
+html:not(.dark) .bg-gray-900\/20  { background-color: rgba(203,213,225,0.15) !important; }
+html:not(.dark) .bg-gray-800\/50  { background-color: rgba(226,232,240,0.70) !important; }
+html:not(.dark) .bg-gray-700\/50  { background-color: rgba(226,232,240,0.55) !important; }
+html:not(.dark) .bg-gray-600\/15  { background-color: rgba(203,213,225,0.25) !important; }
+
+/* Dark hex panels */
+html:not(.dark) .bg-\[\#111827\]  { background-color: #ffffff !important; }
+html:not(.dark) .bg-\[\#0f172a\]  { background-color: #f8fafd !important; }
+html:not(.dark) .bg-\[\#1f2937\]  { background-color: #f4f7fc !important; }
+html:not(.dark) .bg-\[\#0d1524\]  { background-color: #ffffff !important; }
+html:not(.dark) .bg-\[\#101a2d\]  { background-color: #f8fafc !important; }
+html:not(.dark) .bg-\[\#0b1220\]  { background-color: #ffffff !important; }
+html:not(.dark) .bg-\[\#0b1728\]  { background-color: #f8fafc !important; }
+html:not(.dark) .bg-\[\#0f1723\]  { background-color: #f5f7fa !important; }
+html:not(.dark) .bg-\[\#152238\]  { background-color: #f0f4f8 !important; }
+html:not(.dark) .bg-\[\#1a2332\]  { background-color: #f0f4f8 !important; }
+html:not(.dark) .bg-\[\#0f1a2b\]  { background-color: #f0f4f8 !important; }
+html:not(.dark) .bg-\[\#3b4a63\]  { background-color: #edf2fb !important; }
+html:not(.dark) .bg-\[\#0a0e1a\]  { background-color: #f5f7fa !important; }
+html:not(.dark) .bg-\[\#101a2c\]  { background-color: #f4f7fc !important; }
+html:not(.dark) .bg-\[\#1e293b\]  { background-color: #edf2fb !important; }
+html:not(.dark) .bg-\[\#0c1525\]  { background-color: #f4f7fc !important; }
+html:not(.dark) .bg-\[\#0c1528\]  { background-color: #f4f7fc !important; }
+html:not(.dark) .bg-\[\#162035\]  { background-color: #edf2fb !important; }
+html:not(.dark) .bg-\[\#050c1a\]  { background-color: #e8edf8 !important; }
+html:not(.dark) .bg-\[\#080e1c\]  { background-color: #f0f4fb !important; }
+html:not(.dark) .bg-\[\#0f1a2e\]  { background-color: #ffffff !important; }
+
+/* Red/danger panels */
+html:not(.dark) .bg-\[\#291126\]  { background-color: #fef2f2 !important; }
+html:not(.dark) .bg-\[\#2a1219\]  { background-color: #fef2f2 !important; }
+html:not(.dark) .bg-\[\#33152f\]  { background-color: #fee2e2 !important; }
+
+/* Opacity variants */
+html:not(.dark) .bg-\[\#0f1723\]\/60  { background-color: rgba(244,247,252,0.85) !important; }
+html:not(.dark) .bg-\[\#0f1723\]\/40  { background-color: rgba(244,247,252,0.7) !important; }
+html:not(.dark) .bg-\[\#0f1723\]\/70  { background-color: rgba(244,247,252,0.9) !important; }
+html:not(.dark) .bg-\[\#1f2937\]\/60  { background-color: rgba(244,247,252,0.85) !important; }
+
+/* Hover states */
+html:not(.dark) .hover\:bg-\[\#465671\]:hover  { background-color: #e2e8f0 !important; }
+html:not(.dark) .hover\:bg-\[\#33152f\]:hover  { background-color: #fee2e2 !important; }
+html:not(.dark) .hover\:bg-\[\#1f2937\]\/60:hover { background-color: rgba(232,238,248,0.9) !important; }
+
+/* Toasts: give them a proper light look */
+html:not(.dark) .gp-log-prompt-toast {
+  background: linear-gradient(180deg, #ffffff 0%, #f4f8ff 100%) !important;
+  border-color: #b8d0f0 !important;
+  box-shadow: 0 8px 32px rgba(10, 30, 80, 0.16) !important;
+}
+html:not(.dark) .gp-log-prompt-toast .bg-\[linear-gradient\(90deg\,\#22d3ee_0\%\,\#0891b2_100\%\)\] {
+  background: linear-gradient(90deg, #000e9c 0%, #002dbe 100%) !important;
+}
+html:not(.dark) .gp-log-prompt-toast .text-cyan-300,
+html:not(.dark) .gp-log-prompt-toast .text-cyan-200 { color: #000e9c !important; }
+html:not(.dark) .gp-log-prompt-toast .text-slate-100 { color: #1e293b !important; }
+html:not(.dark) .gp-log-prompt-toast .text-slate-300 { color: #475569 !important; }
+html:not(.dark) .gp-log-prompt-toast .border-white\/10 { border-color: rgba(0,80,215,0.12) !important; }
+html:not(.dark) .gp-log-prompt-toast .bg-white\/5 { background: rgba(0,80,215,0.04) !important; }
+html:not(.dark) .gp-log-prompt-toast .bg-white\/4 { background: rgba(0,80,215,0.03) !important; }
+html:not(.dark) .gp-log-prompt-toast .bg-cyan-500\/10 { background: rgba(0,80,215,0.08) !important; }
+html:not(.dark) .gp-log-prompt-toast .bg-cyan-950\/70 { background: rgba(0,80,215,0.06) !important; }
+html:not(.dark) .gp-log-prompt-toast .ring-cyan-400\/20 { --tw-ring-color: rgba(0,80,215,0.15); }
+
+/* GameConfig tooltip overlay */
+html:not(.dark) .bg-\[linear-gradient\(180deg\,rgba\(15\,23\,42\,0\.98\)\,rgba\(11\,18\,32\,0\.98\)\)\] {
+  background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(244,248,255,0.98)) !important;
+}
+
+/* ─────────────────────────────────────────────────────
+   2) BORDERS
+   ───────────────────────────────────────────────────── */
+
+html:not(.dark) .border-gray-600      { border-color: #c5d5ea !important; }
+html:not(.dark) .border-gray-700      { border-color: #d8e6f5 !important; }
+html:not(.dark) .border-gray-800      { border-color: #e2ecf8 !important; }
+html:not(.dark) .border-white\/10     { border-color: rgba(0,50,150,0.1) !important; }
+html:not(.dark) .border-white\/20     { border-color: rgba(0,50,150,0.15) !important; }
+html:not(.dark) .border-white\/6      { border-color: rgba(0,50,150,0.08) !important; }
+html:not(.dark) .border-gray-700\/80  { border-color: rgba(200,216,238,0.9) !important; }
+html:not(.dark) .border-gray-700\/60  { border-color: rgba(200,216,238,0.7) !important; }
+html:not(.dark) .border-gray-700\/50  { border-color: rgba(200,216,238,0.6) !important; }
+html:not(.dark) .border-gray-700\/30  { border-color: rgba(200,216,238,0.4) !important; }
+html:not(.dark) .border-gray-600\/70  { border-color: rgba(197,213,234,0.7) !important; }
+html:not(.dark) .border-\[\#324666\]  { border-color: #c5d5ea !important; }
+html:not(.dark) .border-\[\#27354b\]  { border-color: #d0ddf0 !important; }
+html:not(.dark) .border-\[\#27364d\]  { border-color: #d0ddf0 !important; }
+html:not(.dark) .border-\[\#1f2a44\]  { border-color: #d0ddf0 !important; }
+html:not(.dark) .border-\[\#334155\]  { border-color: #c5d5ea !important; }
+html:not(.dark) .border-\[\#374151\]  { border-color: #c5d5ea !important; }
+html:not(.dark) .border-\[\#425774\]  { border-color: #c5d5ea !important; }
+html:not(.dark) .border-\[\#3a516f\]  { border-color: #c5d5ea !important; }
+html:not(.dark) .border-\[\#991b4e\]  { border-color: #fca5a5 !important; }
+html:not(.dark) .border-\[\#1f2937\]  { border-color: #d8e6f5 !important; }
+html:not(.dark) .border-cyan-700\/50  { border-color: rgba(0, 80, 215, 0.25) !important; }
+html:not(.dark) .divide-gray-700 > :not([hidden]) ~ :not([hidden]) { border-color: #d8e6f5 !important; }
+html:not(.dark) .divide-gray-800 > :not([hidden]) ~ :not([hidden]) { border-color: #e2ecf8 !important; }
+
+/* ─────────────────────────────────────────────────────
+   3) TEXT COLORS (arbitrary hex)
+   ───────────────────────────────────────────────────── */
+
+html:not(.dark) .text-\[\#e6edf7\]  { color: #0f172a !important; }
+html:not(.dark) .text-\[\#eef4fa\]  { color: #334155 !important; }
+html:not(.dark) .text-\[\#e2e8f0\]  { color: #334155 !important; }
+html:not(.dark) .text-\[\#cbd5e1\]  { color: #475569 !important; }
+html:not(.dark) .text-\[\#93a5be\]  { color: #64748b !important; }
+html:not(.dark) .text-\[\#b9d9ee\]  { color: #475569 !important; }
+html:not(.dark) .text-\[\#e86180\]  { color: #dc2626 !important; }
+html:not(.dark) .text-\[\#d8e4f4\]  { color: #1e293b !important; }
+html:not(.dark) .hover\:text-\[\#f17993\]:hover  { color: #b91c1c !important; }
+
+/* Hard-coded light text on dark surfaces */
+html:not(.dark) .text-red-200,
+html:not(.dark) .text-red-200\/90  { color: #dc2626 !important; }
+html:not(.dark) .text-green-200    { color: #15803d !important; }
+html:not(.dark) .text-slate-100    { color: #1e293b !important; }
+
+/* ─────────────────────────────────────────────────────
+   GLOBAL STATUS COLORS (light mode)
+   Dark-tuned status text/tints used by portaled modals
+   (user admin, confirmation, install progress, panel
+   update, news…) that sit outside any scoped block.
+   The console panel is intentionally dark in light mode,
+   so its bright log-level colors are re-asserted below.
+   ───────────────────────────────────────────────────── */
+html:not(.dark) .text-green-400  { color: #15803d !important; }
+html:not(.dark) .text-red-400    { color: #dc2626 !important; }
+html:not(.dark) .text-yellow-400 { color: #b45309 !important; }
+html:not(.dark) .text-green-500  { color: #15803d !important; }
+html:not(.dark) .text-blue-500   { color: #1d4ed8 !important; }
+html:not(.dark) .text-yellow-500 { color: #b45309 !important; }
+html:not(.dark) .text-red-500    { color: #dc2626 !important; }
+html:not(.dark) .text-red-300    { color: #dc2626 !important; }
+html:not(.dark) .text-amber-300  { color: #b45309 !important; }
+html:not(.dark) .text-amber-200  { color: #92400e !important; }
+html:not(.dark) .text-blue-300   { color: #1d4ed8 !important; }
+
+/* Status tint backgrounds: faint dark-mode tints → readable light tints */
+html:not(.dark) .bg-yellow-500\/10 { background-color: rgba(245, 158, 11, 0.12) !important; }
+html:not(.dark) .bg-red-500\/10    { background-color: rgba(220, 38, 38, 0.08) !important; }
+html:not(.dark) .bg-amber-500\/10  { background-color: rgba(245, 158, 11, 0.10) !important; }
+html:not(.dark) .bg-slate-700\/35  { background-color: rgba(0, 80, 215, 0.10) !important; }
+html:not(.dark) .border-slate-500\/30 { border-color: rgba(0, 80, 215, 0.25) !important; }
+
+/* Framework install log (CS2): repaint near-black box to a light code surface
+   so the (now dark-remapped) text-gray-300 stays readable when expanded */
+html:not(.dark) .bg-gray-950 { background-color: #f1f5f9 !important; }
+
+/* Console panel stays dark in light mode — keep bright log-level colors */
+html:not(.dark) .gp-console-panel .text-green-400,
+html:not(.dark) .gp-console-terminal .text-green-400 { color: #4ade80 !important; }
+html:not(.dark) .gp-console-panel .text-red-400,
+html:not(.dark) .gp-console-terminal .text-red-400 { color: #f87171 !important; }
+html:not(.dark) .gp-console-panel .text-yellow-400,
+html:not(.dark) .gp-console-terminal .text-yellow-400 { color: #facc15 !important; }
+
+/* Host Status time-range pills: inactive bg-white/10 is invisible on the
+   light page — give it a visible light-grey surface */
+html:not(.dark) .gp-host-range .bg-white\/10 { background-color: rgba(15, 23, 42, 0.06) !important; }
+html:not(.dark) .gp-host-range .hover\:bg-white\/15:hover { background-color: rgba(15, 23, 42, 0.10) !important; }
+
+/* GameConfig "settings saved" success toast: it shares .gp-log-prompt-toast
+   (white surface) but needs an emerald light surface + readable emerald text */
+html:not(.dark) .gp-config-saved-toast {
+  background: linear-gradient(180deg, #ecfdf5 0%, #d1fae5 100%) !important;
+  border-color: rgba(16, 185, 129, 0.35) !important;
+}
+html:not(.dark) .gp-config-saved-toast .text-white     { color: #065f46 !important; }
+html:not(.dark) .gp-config-saved-toast .text-slate-200 { color: #047857 !important; }
+html:not(.dark) .gp-config-saved-toast .text-emerald-300 { color: #059669 !important; }
+html:not(.dark) .gp-config-saved-toast .bg-emerald-500\/10 { background-color: rgba(16, 185, 129, 0.14) !important; }
+
+/* ─────────────────────────────────────────────────────
+   RESOURCES CARDS — media badges & tags
+   Dark-only badge combos need light-mode equivalents.
+   ───────────────────────────────────────────────────── */
+
+/* Article icon badge: bg-blue-900/40 → soft OVHcloud blue tint */
+html:not(.dark) .bg-blue-900\/40   { background-color: rgba(0, 80, 215, 0.10) !important; }
+/* Article/blue icon color: #60a5fa is too light on white — use accessible OVHcloud blue */
+html:not(.dark) .text-blue-400     { color: #1d4ed8 !important; }
+
+/* Video icon badge: bg-purple-900/40 → soft purple tint */
+html:not(.dark) .bg-purple-900\/40 { background-color: rgba(109, 40, 217, 0.10) !important; }
+/* Video/purple icon color: #c084fc is too light on white — use darker purple */
+html:not(.dark) .text-purple-400   { color: #7c3aed !important; }
+
+/* Game key tag: /80 opacity variant of gray-800 not covered by the base bg-gray-800 override */
+html:not(.dark) .bg-gray-800\/80   { background-color: #edf2fb !important; }
+
+/* Resource card hover border (hover: variant not covered by the static border-gray-700 rule) */
+html:not(.dark) .hover\:border-gray-700:hover { border-color: #b8cfe8 !important; }
+
+/* ─────────────────────────────────────────────────────
+   4) BUTTONS with dark hardcoded backgrounds
+   ───────────────────────────────────────────────────── */
+
+/* "Cancel" / secondary buttons: bg-gray-700 hover:bg-gray-600 text-white */
+html:not(.dark) .rounded.bg-gray-700,
+html:not(.dark) .rounded-lg.bg-gray-700,
+html:not(.dark) .rounded-xl.bg-gray-700,
+html:not(.dark) [class*='rounded'][class*='bg-gray-700']:not([class*='hover']) {
+  background-color: #e8eef8 !important;
+  color: #334155 !important;
+}
+html:not(.dark) .hover\:bg-gray-600:hover {
+  background-color: #d8e3ef !important;
+}
+
+/* ─────────────────────────────────────────────────────
+   5) ACCENT BACKGROUND SCOPING
+      Locally restore white text on blue/red accent surfaces.
+   ───────────────────────────────────────────────────── */
+
+html:not(.dark) [class~="bg-[#000e9c]"],
+html:not(.dark) [class~="bg-[#002dbe]"],
+html:not(.dark) .bg-red-500,
+html:not(.dark) .bg-red-600,
+html:not(.dark) .bg-red-700,
+html:not(.dark) .hover\:bg-\[\#002dbe\]:hover,
+html:not(.dark) .hover\:bg-red-500:hover,
+html:not(.dark) .hover\:bg-red-700:hover {
+  --gp-text-white: #ffffff;
+  --gp-text-gray-100: #ffffff;
+  --gp-text-gray-200: #ffffffdd;
+  --gp-text-gray-300: #ffffffcc;
+  --gp-text-gray-400: #ffffffbb;
+  --gp-text-gray-500: #ffffffaa;
+  color: #ffffff;
+}
+
+/* ─────────────────────────────────────────────────────
+   SIDEBAR BOTTOM: always dark-themed
+   ───────────────────────────────────────────────────── */
+
+html:not(.dark) .gp-sidebar-bottom {
+  --gp-text-white: #e6edf7;
+  --gp-text-gray-100: #f3f4f6;
+  --gp-text-gray-200: #e5e7eb;
+  --gp-text-gray-300: #d1d5db;
+  --gp-text-gray-400: #9ca3af;
+  --gp-text-gray-500: #6b7280;
+  --gp-text-slate-200: #e2e8f0;
+  --gp-text-slate-300: #cbd5e1;
+  --gp-text-slate-400: #94a3b8;
+}
+
+html:not(.dark) .gp-sidebar-bottom .bg-\[\#0f1a2b\]              { background-color: #0f1a2b !important; }
+html:not(.dark) .gp-sidebar-bottom .bg-\[\#3b4a63\]              { background-color: #3b4a63 !important; }
+html:not(.dark) .gp-sidebar-bottom .bg-\[\#291126\]              { background-color: #291126 !important; }
+html:not(.dark) .gp-sidebar-bottom .hover\:bg-\[\#465671\]:hover { background-color: #465671 !important; }
+html:not(.dark) .gp-sidebar-bottom .hover\:bg-\[\#33152f\]:hover { background-color: #33152f !important; }
+html:not(.dark) .gp-sidebar-bottom .border-white\/10             { border-color: rgba(255,255,255,0.1) !important; }
+html:not(.dark) .gp-sidebar-bottom .border-\[\#324666\]          { border-color: #324666 !important; }
+html:not(.dark) .gp-sidebar-bottom .border-\[\#991b4e\]          { border-color: #991b4e !important; }
+html:not(.dark) .gp-sidebar-bottom .text-\[\#eef4fa\]            { color: #eef4fa !important; }
+html:not(.dark) .gp-sidebar-bottom .text-\[\#e86180\]            { color: #e86180 !important; }
+html:not(.dark) .gp-sidebar-bottom .hover\:text-\[\#f17993\]:hover { color: #f17993 !important; }
+
+/* ─────────────────────────────────────────────────────
+   SIDEBAR NAV: restore white text on ghost buttons
+   (sidebar keeps its dark navy bg in light mode)
+   ───────────────────────────────────────────────────── */
+
+html:not(.dark) .gp-sidebar-nav .gp-app-button--ghost[data-ods='button'] {
+  color: rgba(255, 255, 255, 0.8) !important;
+}
+
+html:not(.dark) .gp-sidebar-nav .gp-app-button--ghost[data-ods='button']:hover {
+  color: #ffffff !important;
+  background-color: rgba(255, 255, 255, 0.22) !important;
+}
+
+html:not(.dark) .gp-sidebar-nav .gp-app-button--ghost[data-ods='button'][disabled],
+html:not(.dark) .gp-sidebar-nav .gp-app-button--ghost[data-ods='button'][aria-disabled='true'] {
+  color: rgba(255, 255, 255, 0.35) !important;
+}
+
+/* ─────────────────────────────────────────────────────
+   CONSOLE PANEL: light-mode — OVHcloud blue theme
+   Header/footer: #000e9c. Terminal: deep navy.
+   Local variable overrides ensure the active tab (white
+   pill) and all text are readable on the blue background.
+   ───────────────────────────────────────────────────── */
+
+/* Card frame + local token overrides */
+html:not(.dark) .gp-console-panel {
+  border-color: rgba(30, 42, 60, 0.30) !important;
+  box-shadow:
+    0 4px 20px rgba(15, 23, 42, 0.14),
+    0 1px 6px rgba(15, 23, 42, 0.08) !important;
+
+  /* White-on-dark text tokens */
+  --gp-text-gray-300: rgba(255, 255, 255, 0.92);
+  --gp-text-gray-400: rgba(255, 255, 255, 0.65);
+  --gp-text-gray-500: rgba(255, 255, 255, 0.45);
+
+  /*
+   * Active tab pill: white pill stands out against dark header.
+   */
+  --color-cyan-400: rgba(255, 255, 255, 0.88);
+  --gp-primary-300: #ffffff;
+
+  /*
+   * Badge on "Gamepanel logs" tab: override accent-secondary to a bright blue
+   * so it stays visible against the dark navy console header.
+   */
+  --gp-ods-accent-secondary: #157eea;
+}
+
+/* Header + footer bars — muted dark navy, not vivid blue */
+html:not(.dark) .gp-console-panel .bg-gp-surface-input {
+  background-color: #1a2436 !important;
+}
+
+/* Inactive tab bg: slightly darker for depth */
+html:not(.dark) .gp-console-panel .bg-gp-surface-elevated {
+  background-color: #141c2c !important;
+}
+
+/* Separator borders: soft white */
+html:not(.dark) .gp-console-panel .border-gray-700 {
+  border-color: rgba(255, 255, 255, 0.10) !important;
+}
+
+/* Terminal: deep navy */
+html:not(.dark) .gp-console-terminal {
+  background-color: #020c1f !important;
+}
+
+/* Text colours in header/footer */
+html:not(.dark) .gp-console-panel .text-gray-400 {
+  color: rgba(255, 255, 255, 0.65) !important;
+}
+html:not(.dark) .gp-console-panel .text-gray-500 {
+  color: rgba(255, 255, 255, 0.45) !important;
+}
+html:not(.dark) .gp-console-panel .text-white {
+  color: #ffffff !important;
+}
+
+/* Hover bg on tabs/buttons in the blue header */
+html:not(.dark) .gp-console-panel .hover\:bg-gray-700:hover {
+  background-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+/* Ghost buttons (Copy, Clear, tab close X) */
+html:not(.dark) .gp-console-panel .gp-app-button--ghost[data-ods='button'] {
+  color: rgba(255, 255, 255, 0.65) !important;
+}
+html:not(.dark) .gp-console-panel .gp-app-button--ghost[data-ods='button']:hover {
+  color: #ffffff !important;
+  background-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+/* "POWERED BY" label */
+html:not(.dark) .gp-console-panel .uppercase {
+  color: rgba(255, 255, 255, 0.45) !important;
+}
+
+/* Terminal empty-state */
+html:not(.dark) .gp-console-terminal .text-gray-500 {
+  color: rgba(255, 255, 255, 0.30) !important;
+}
+
+/* ─────────────────────────────────────────────────────
+   GAME SERVERS TABLE: button palette in light mode
+   Uses semantic class names (gp-btn-*) added to TSX.
+   Neutral buttons use gp-app-button--neutral (not ghost).
+   ───────────────────────────────────────────────────── */
+
+/* Base: reset all neutral buttons inside the table to clean light style */
+html:not(.dark) :is(.gp-game-servers-table, .gp-game-servers-mobile) .gp-app-button--neutral[data-ods='button'] {
+  background: #f0f4f8 !important;
+  border-color: #c5d4e3 !important;
+  color: #334155 !important;
+}
+
+/* ══ LOGS button ══ */
+html:not(.dark) .gp-game-servers-table .gp-btn-logs[data-ods='button']:not([disabled]) {
+  background: #0050D7 !important;
+  border-color: #003fa8 !important;
+  color: #ffffff !important;
+}
+html:not(.dark) .gp-game-servers-table .gp-btn-logs[data-ods='button']:not([disabled]):hover {
+  background: #157eea !important;
+  border-color: #0062c3 !important;
+  color: #ffffff !important;
+}
+
+/* ══ CONSOLE button ══ */
+html:not(.dark) .gp-game-servers-table .gp-btn-console[data-ods='button']:not([disabled]) {
+  background: #22c55e !important;
+  border-color: #16a34a !important;
+  color: #ffffff !important;
+}
+html:not(.dark) .gp-game-servers-table .gp-btn-console[data-ods='button']:not([disabled]):hover {
+  background: #16a34a !important;
+  color: #ffffff !important;
+}
+
+/* ══ SETTINGS button ══ */
+html:not(.dark) :is(.gp-game-servers-table, .gp-game-servers-mobile) .gp-btn-settings[data-ods='button']:not([disabled]) {
+  background: #e8eef8 !important;
+  border-color: #c5d5ea !important;
+  color: #334155 !important;
+}
+html:not(.dark) :is(.gp-game-servers-table, .gp-game-servers-mobile) .gp-btn-settings[data-ods='button']:not([disabled]):hover {
+  background: #d0ddf0 !important;
+  color: #1e293b !important;
+}
+
+/* Mobile-only Log/Console button (blue accent) — keep the blue background and white
+   label in light mode (otherwise the global text-white remap turns the label dark). */
+html:not(.dark) .gp-game-servers-mobile .gp-btn-console-mobile[data-ods='button']:not([disabled]) {
+  /* Override the var the layered `.text-white` utility reads — a plain `color` would lose to it
+     (layered !important beats unlayered !important regardless of specificity). */
+  --gp-text-white: #ffffff;
+  background-color: #0050d7 !important;
+  border-color: #0050d7 !important;
+  color: #ffffff !important;
+}
+html:not(.dark) .gp-game-servers-mobile .gp-btn-console-mobile[data-ods='button']:not([disabled]):hover {
+  --gp-text-white: #ffffff;
+  background-color: #157eea !important;
+  border-color: #157eea !important;
+  color: #ffffff !important;
+}
+
+/* Mobile-only Delete button (solid red) — keep it red with a white icon in light mode
+   (the base ODS button surface would otherwise win and render it grey). */
+html:not(.dark) .gp-game-servers-mobile .gp-btn-delete[data-ods='button']:not([disabled]) {
+  background-color: #dc2626 !important;
+  border-color: #dc2626 !important;
+  color: #ffffff !important;
+}
+html:not(.dark) .gp-game-servers-mobile .gp-btn-delete[data-ods='button']:not([disabled]):hover {
+  background-color: #ef4444 !important;
+  border-color: #ef4444 !important;
+  color: #ffffff !important;
+}
+
+/* Mobile list — semantic icon/text colors the base ODS button surface would otherwise
+   neutralize in light mode (e.g. the rename save ✓ / cancel ✗ icon buttons). The more
+   specific status/power rules above still win where they apply. */
+html:not(.dark) .gp-game-servers-mobile .text-green-400 { color: #15803d !important; }
+html:not(.dark) .gp-game-servers-mobile .text-red-400 { color: #dc2626 !important; }
+
+/* ══ POWER icon buttons ══ */
+/* Stop (red tint) */
+html:not(.dark) :is(.gp-game-servers-table, .gp-game-servers-mobile) .gp-btn-power[data-ods='button'].bg-red-600\/10 {
+  background: rgba(220, 38, 38, 0.10) !important;
+  border-color: rgba(220, 38, 38, 0.55) !important;
+  color: #dc2626 !important;
+}
+html:not(.dark) :is(.gp-game-servers-table, .gp-game-servers-mobile) .gp-btn-power[data-ods='button'].bg-red-600\/10:hover {
+  background: #ef4444 !important;
+  border-color: #dc2626 !important;
+  color: #ffffff !important;
+}
+/* Start (green tint) */
+html:not(.dark) :is(.gp-game-servers-table, .gp-game-servers-mobile) .gp-btn-power[data-ods='button'].bg-green-600\/10 {
+  background: rgba(22, 163, 74, 0.14) !important;
+  border-color: rgba(22, 163, 74, 0.55) !important;
+  color: #15803d !important;
+}
+html:not(.dark) :is(.gp-game-servers-table, .gp-game-servers-mobile) .gp-btn-power[data-ods='button'].bg-green-600\/10:hover {
+  background: #22c55e !important;
+  border-color: #16a34a !important;
+  color: #ffffff !important;
+}
+/* Restart (orange tint) */
+html:not(.dark) :is(.gp-game-servers-table, .gp-game-servers-mobile) .gp-btn-power[data-ods='button'].bg-orange-600\/10 {
+  background: rgba(194, 65, 12, 0.10) !important;
+  border-color: rgba(194, 65, 12, 0.55) !important;
+  color: #c2410c !important;
+}
+html:not(.dark) :is(.gp-game-servers-table, .gp-game-servers-mobile) .gp-btn-power[data-ods='button'].bg-orange-600\/10:hover {
+  background: #f97316 !important;
+  border-color: #ea580c !important;
+  color: #ffffff !important;
+}
+
+/* ══ DISABLED (all) — comes last, uses [disabled] only ══ */
+html:not(.dark) :is(.gp-game-servers-table, .gp-game-servers-mobile) .gp-app-button--neutral[data-ods='button'][disabled] {
+  background: #f1f5f9 !important;
+  border-color: #e2e8f0 !important;
+  color: #94a3b8 !important;
+}
+
+/* ══ STATUS BADGES ══ */
+html:not(.dark) :is(.gp-game-servers-table, .gp-game-servers-mobile) .gp-status-badge[data-ods='button'].text-green-400 {
+  background: rgba(22, 163, 74, 0.10) !important;
+  border-color: rgba(22, 163, 74, 0.38) !important;
+  color: #15803d !important;
+}
+html:not(.dark) :is(.gp-game-servers-table, .gp-game-servers-mobile) .gp-status-badge[data-ods='button'].text-red-400 {
+  background: rgba(220, 38, 38, 0.08) !important;
+  border-color: rgba(220, 38, 38, 0.32) !important;
+  color: #dc2626 !important;
+}
+html:not(.dark) :is(.gp-game-servers-table, .gp-game-servers-mobile) .gp-status-badge[data-ods='button'].text-blue-300 {
+  background: rgba(37, 99, 235, 0.08) !important;
+  border-color: rgba(37, 99, 235, 0.32) !important;
+  color: #1d4ed8 !important;
+}
+html:not(.dark) :is(.gp-game-servers-table, .gp-game-servers-mobile) .gp-status-badge[data-ods='button'].text-cyan-300 {
+  background: rgba(0, 14, 156, 0.08) !important;
+  border-color: rgba(0, 14, 156, 0.32) !important;
+  color: #000e9c !important;
+}
+html:not(.dark) :is(.gp-game-servers-table, .gp-game-servers-mobile) .gp-status-badge[data-ods='button'].text-orange-300 {
+  background: rgba(194, 65, 12, 0.08) !important;
+  border-color: rgba(194, 65, 12, 0.32) !important;
+  color: #c2410c !important;
+}
+html:not(.dark) :is(.gp-game-servers-table, .gp-game-servers-mobile) .gp-status-badge[data-ods='button'].text-yellow-300 {
+  background: rgba(180, 83, 9, 0.08) !important;
+  border-color: rgba(180, 83, 9, 0.32) !important;
+  color: #b45309 !important;
+}
+
+/* ─────────────────────────────────────────────────────
+   USER AVATAR — always dark-themed (inside navy sidebar)
+   ───────────────────────────────────────────────────── */
+html:not(.dark) .gp-user-avatar {
+  background: rgba(0, 0, 0, 0.28) !important;
+  border-color: rgba(255, 255, 255, 0.28) !important;
+  color: #ffffff !important;
+}
+
+/* ─────────────────────────────────────────────────────
+   SERVER SETTINGS MODAL — light mode palette
+   ───────────────────────────────────────────────────── */
+
+/* Modal container */
+html:not(.dark) .gp-settings-modal > div {
+  box-shadow: 0 20px 60px rgba(0, 14, 156, 0.12), 0 4px 16px rgba(0, 14, 156, 0.07) !important;
+  border-color: #dce8f5 !important;
+}
+
+/* Sidebar bg */
+html:not(.dark) .gp-settings-modal .bg-\[\#1e293b\] {
+  background-color: #f0f4fb !important;
+}
+
+/* Active tab — white text + icon on navy background */
+html:not(.dark) .gp-settings-modal .gp-settings-menu-btn.gp-app-button--ghost[data-ods='button'][class~="bg-[var(--gp-primary-300)]"] {
+  color: #ffffff !important;
+}
+
+/* Inactive tab — clean dark text */
+html:not(.dark) .gp-settings-modal .gp-settings-menu-btn.gp-app-button--ghost[data-ods='button']:not([class~="bg-[var(--gp-primary-300)]"]):not([disabled]):not([aria-disabled='true']) {
+  color: #334155 !important;
+}
+html:not(.dark) .gp-settings-modal .gp-settings-menu-btn.gp-app-button--ghost[data-ods='button']:not([class~="bg-[var(--gp-primary-300)]"]):not([disabled]):not([aria-disabled='true']):hover {
+  background: rgba(0, 14, 156, 0.07) !important;
+  color: #000e9c !important;
+}
+
+/* Disabled tab */
+html:not(.dark) .gp-settings-modal .gp-settings-menu-btn.gp-app-button--ghost[data-ods='button'][disabled],
+html:not(.dark) .gp-settings-modal .gp-settings-menu-btn.gp-app-button--ghost[data-ods='button'][aria-disabled='true'] {
+  color: #94a3b8 !important;
+}
+
+/* Config section cards */
+html:not(.dark) .gp-settings-modal .bg-gp-surface-base\/45 {
+  background-color: rgba(240, 244, 251, 0.6) !important;
+}
+
+/* Tooltip — keep dark style (common pattern), just ensure border fits */
+html:not(.dark) .gp-settings-modal [class*="bg-[linear-gradient"] {
+  border-color: rgba(0, 14, 156, 0.18) !important;
+}
+
+/* Amber warning text → readable in light mode */
+html:not(.dark) .gp-settings-modal .text-amber-300 {
+  color: #b45309 !important;
+}
+
+/* Error section */
+html:not(.dark) .gp-settings-modal .text-red-300 {
+  color: #dc2626 !important;
+}
+
+/* ── SSH TERMINAL — warning box (light mode) ── */
+html:not(.dark) .gp-settings-modal .border-yellow-500\/40 {
+  border-color: rgba(217, 119, 6, 0.45) !important;
+  background-color: rgba(254, 243, 199, 0.5) !important;
+}
+html:not(.dark) .gp-settings-modal .text-yellow-200 {
+  color: #92400e !important;
+}
+html:not(.dark) .gp-settings-modal .text-yellow-400 {
+  color: #d97706 !important;
+}
+/* "I understand, open terminal" button */
+html:not(.dark) .gp-settings-modal .bg-yellow-500\/90 {
+  background-color: #000e9c !important;
+  color: #ffffff !important;
+}
+html:not(.dark) .gp-settings-modal .hover\:bg-yellow-400:hover {
+  background-color: #002dbe !important;
+}
+
+/* ── SSH TERMINAL — status badge colors ── */
+html:not(.dark) .gp-settings-modal .bg-yellow-500\/10 { background-color: rgba(245, 158, 11, 0.10) !important; }
+html:not(.dark) .gp-settings-modal .border-yellow-500\/30 { border-color: rgba(217, 119, 6, 0.38) !important; }
+html:not(.dark) .gp-settings-modal .text-yellow-300 { color: #b45309 !important; }
+
+/* ── BACKUP TAB — "Create backup now" button ── */
+html:not(.dark) .gp-settings-modal button.bg-gray-700:not([data-ods]) {
+  background-color: #000e9c !important;
+  color: #ffffff !important;
+  border: none !important;
+}
+html:not(.dark) .gp-settings-modal button.bg-gray-700:not([data-ods]):hover {
+  background-color: #002dbe !important;
+}
+
+/* ── FILE MANAGER — blue buttons & elements ── */
+/* Save / blue action buttons */
+html:not(.dark) .gp-settings-modal [data-ods='button'][class~="bg-[#0050D7]"]:not([disabled]) {
+  background: #0050D7 !important;
+  color: #ffffff !important;
+}
+html:not(.dark) .gp-settings-modal [data-ods='button'][class~="bg-[#0050D7]"]:not([disabled]):hover {
+  background: #157eea !important;
+  color: #ffffff !important;
+}
+
+/* Symlink badge — amber text readable in light mode */
+html:not(.dark) .gp-settings-modal .text-amber-300 {
+  color: #b45309 !important;
+}
+html:not(.dark) .gp-settings-modal .text-amber-400 {
+  color: #d97706 !important;
+}
+
+/* Breadcrumb bar — ensure border is subtle */
+html:not(.dark) .gp-settings-modal .gp-path-breadcrumb {
+  border-color: #c5d4e3 !important;
+}
+
+/* ── MINECRAFT SECTIONS — light mode colors ── */
+html:not(.dark) .gp-settings-modal .text-red-400    { color: #dc2626 !important; }
+html:not(.dark) .gp-settings-modal .text-emerald-400 { color: #059669 !important; }
+/* bg-gp-surface-input already handled globally; bg-gray-900/30 already handled globally */
+/* focus border: --color-cyan-400 = #000e9c in light mode → navy blue focus ring ✓ */
+
+/* ─────────────────────────────────────────────────────
+   HOST STATUS — chart tooltip (light mode)
+   tooltipLabel uses var(--color-cyan-400) as an inline
+   React style; override the variable within the tooltip
+   wrapper scope so inline styles resolve to a light color.
+   ───────────────────────────────────────────────────── */
+html:not(.dark) .recharts-tooltip-wrapper {
+  --color-cyan-400: rgba(255, 255, 255, 0.92);
+}
+html:not(.dark) .recharts-tooltip-wrapper .recharts-default-tooltip {
+  color: rgba(255, 255, 255, 0.90) !important;
+}
+html:not(.dark) .recharts-tooltip-wrapper .recharts-tooltip-item {
+  color: rgba(255, 255, 255, 0.82) !important;
+}
+html:not(.dark) .recharts-tooltip-wrapper .recharts-tooltip-item-name,
+html:not(.dark) .recharts-tooltip-wrapper .recharts-tooltip-item-separator,
+html:not(.dark) .recharts-tooltip-wrapper .recharts-tooltip-item-value {
+  color: rgba(255, 255, 255, 0.82) !important;
+}
+
+/* ─────────────────────────────────────────────────────
+   INSTALL MODALS — light mode overrides
+   ───────────────────────────────────────────────────── */
+
+/*
+ * InstallGameModal: the inner container uses a dark Tailwind gradient
+ * (bg-gradient-to-br from-[#1f2937] to-[#111827]) which sets background-image.
+ * Overriding background-color alone won't clear the gradient — we need to
+ * reset the background shorthand to override both color AND image.
+ */
+html:not(.dark) .gp-install-config-dialog {
+  background: #ffffff !important;
+  border-color: #d0ddf0 !important;
+  box-shadow: 0 20px 60px rgba(10, 30, 80, 0.18), 0 4px 16px rgba(10, 30, 80, 0.10) !important;
+}
+
+/*
+ * InstallGameServer game list: row hover uses hover:bg-[#1f2937] (no opacity suffix)
+ * which has no global override — add a scoped one here.
+ */
+html:not(.dark) .gp-install-games-dialog .hover\:bg-\[\#1f2937\]:hover {
+  background-color: #f1f5f9 !important;
+}
+
+/*
+ * InstallationProgressModal uses bg-gp-surface-card (already overridden to #fff),
+ * but explicitly reset here for the marker class so any future changes stay predictable.
+ */
+html:not(.dark) .gp-install-progress-dialog {
+  background: #ffffff !important;
+  border-color: #d0ddf0 !important;
+  box-shadow: 0 20px 60px rgba(10, 30, 80, 0.18), 0 4px 16px rgba(10, 30, 80, 0.10) !important;
+}
+
+/* Progress bar track inside the install progress modal */
+html:not(.dark) .gp-install-progress-dialog .bg-gray-700 {
+  background-color: #e2e8f0 !important;
+}
+
+/* Cancel / secondary button inside install config modal */
+html:not(.dark) .gp-install-config-dialog .bg-gray-700\/50 {
+  background-color: #f1f5f9 !important;
+  color: #334155 !important;
+}
+html:not(.dark) .gp-install-config-dialog .hover\:bg-gray-600\/60:hover {
+  background-color: #e2e8f0 !important;
+}
+
+/* Lock scroll whenever any full-screen overlay is open */
+html:has(.fixed.inset-0),
+body:has(.fixed.inset-0) {
+  overflow: hidden !important;
 }

@@ -17,8 +17,8 @@
     "declarationMap": true,
     "sourceMap": true,
     "moduleResolution": "node",
-    // "noUnusedLocals": true,
-    // "noUnusedParameters": true
+    "noUnusedLocals": true,
+    "noUnusedParameters": true
   },
   "include": [
     "src/**/*"

@@ -13,46 +13,16 @@ const normalizeBaseUrl = (url: string): string => url.replace(/\/+$/, '');
 const readEnvUrl = (value: string | undefined): string => String(value ?? '').trim();
 
 const browserOrigin = getBrowserOrigin();
-export const API_BASE_URL = normalizeBaseUrl(
-  readEnvUrl(import.meta.env.VITE_API_BASE_URL) || browserOrigin
-);
+const browserHost = getBrowserHost();
+
+export const API_BASE_URL = normalizeBaseUrl(browserOrigin);
 export const CATALOG_BASE_URL = normalizeBaseUrl(
-  readEnvUrl(import.meta.env.VITE_DB_API_BASE_URL) || API_BASE_URL || browserOrigin
+  readEnvUrl(import.meta.env.VITE_DB_API_BASE_URL) || API_BASE_URL
 );
-
-export const PUBLIC_CONNECTION_HOST = (() => {
-  try {
-    return new URL(API_BASE_URL).hostname || getBrowserHostname();
-  } catch {
-    return getBrowserHostname();
-  }
-})();
-
-const deriveWsUrl = (apiBaseUrl: string): string => {
-  try {
-    const url = new URL(apiBaseUrl);
-    const wsProtocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${wsProtocol}//${url.host}`;
-  } catch {
-    const wsProtocol = getBrowserProtocol() === 'https:' ? 'wss:' : 'ws:';
-    const host = getBrowserHost();
-    return host ? `${wsProtocol}//${host}` : '';
-  }
-};
-
-const rawWsUrl = readEnvUrl(import.meta.env.VITE_WS_URL) || deriveWsUrl(API_BASE_URL || browserOrigin);
-export const WS_URL = (() => {
-  try {
-    const parsed = new URL(rawWsUrl);
-    const isHttpsPage = getBrowserProtocol() === 'https:';
-    if (isHttpsPage) {
-      parsed.protocol = 'wss:';
-    }
-    return parsed.toString();
-  } catch {
-    return getBrowserProtocol() === 'https:' ? rawWsUrl.replace(/^ws:/, 'wss:') : rawWsUrl;
-  }
-})();
+export const PUBLIC_CONNECTION_HOST = getBrowserHostname();
+export const WS_URL = browserHost
+  ? `${getBrowserProtocol() === 'https:' ? 'wss:' : 'ws:'}//${browserHost}/api`
+  : '';
 
 export const AUTH_TOKEN_KEY = 'auth_token';
 

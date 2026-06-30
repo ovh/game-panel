@@ -2,7 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Info, RefreshCw, Save } from 'lucide-react';
 import { apiClient } from '../utils/api';
 import { GameConfigAdvancedLinks } from './serverSettings/GameConfigAdvancedLinks';
-import { AppButton, AppInput, AppSelect, AppToggle } from '../src/ui/components';
+import { MinecraftSections, type MinecraftSectionsProps } from './serverSettings/MinecraftTab';
+import { HytaleSections, type HytaleSectionsProps } from './serverSettings/HytaleTab';
+import { CS2Sections, type CS2SectionsProps } from './serverSettings/CS2ConfigTab';
+import { AppButton, AppInput, AppSelect, AppSlider, AppToggle } from '../src/ui/components';
 import {
   type CatalogGameDefinition,
   type DbConfigFileDefinition,
@@ -30,11 +33,15 @@ import {
 
 interface GameConfigTabProps {
   serverGame: string;
+  serverProvider?: string;
   serverId?: number | null;
   canReadFileManager?: boolean;
   canWriteFileManager?: boolean;
-  canManageGameUpdates?: boolean;
   onOpenFileManagerPath?: (path: string) => void;
+  minecraftProps?: MinecraftSectionsProps | null;
+  hytaleProps?: HytaleSectionsProps | null;
+  cs2Props?: CS2SectionsProps | null;
+  ovhcloudConfigFiles?: string[];
 }
 
 const clampNumber = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
@@ -141,17 +148,21 @@ const resolveVerifiedUiValue = (
 
 export function GameConfigTab({
   serverGame,
+  serverProvider,
   serverId,
   canReadFileManager = false,
   canWriteFileManager = false,
-  canManageGameUpdates = false,
   onOpenFileManagerPath,
+  minecraftProps,
+  hytaleProps,
+  cs2Props,
+  ovhcloudConfigFiles,
 }: GameConfigTabProps) {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccessMessage, setSaveSuccessMessage] = useState<string | null>(null);
   const [savingConfiguration, setSavingConfiguration] = useState(false);
 
-  const [resolvedGameDefinition, setResolvedGameDefinition] =
+  const [, setResolvedGameDefinition] =
     useState<CatalogGameDefinition | null>(null);
   const [detectedConfigFiles, setDetectedConfigFiles] = useState<string[]>([]);
   const [configFilesLoading, setConfigFilesLoading] = useState(false);
@@ -161,10 +172,6 @@ export function GameConfigTab({
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
   const [initialFieldValues, setInitialFieldValues] = useState<Record<string, string>>({});
   const [touchedFieldIds, setTouchedFieldIds] = useState<Record<string, boolean>>({});
-  const [gameUpdateEnabled, setGameUpdateEnabled] = useState(false);
-  const [gameUpdateLoading, setGameUpdateLoading] = useState(false);
-  const [gameUpdateSaving, setGameUpdateSaving] = useState(false);
-  const [gameUpdateError, setGameUpdateError] = useState<string | null>(null);
   const [openFieldHelpId, setOpenFieldHelpId] = useState<string | null>(null);
 
   const configChanged = useMemo(
@@ -266,7 +273,19 @@ export function GameConfigTab({
     };
 
     const loadConfigMetadata = async () => {
-      if (!serverId) {
+      if (serverProvider === 'ovhcloud') {
+        setResolvedGameDefinition(null);
+        setDetectedConfigFiles(ovhcloudConfigFiles ?? []);
+        setVerifiedConfigFiles([]);
+        setFieldValues({});
+        setInitialFieldValues({});
+        setTouchedFieldIds({});
+        setConfigFilesError(null);
+        setConfigFilesLoading(false);
+        return;
+      }
+
+      if (!serverId || serverProvider !== 'linuxgsm') {
         setResolvedGameDefinition(null);
         setDetectedConfigFiles([]);
         setVerifiedConfigFiles([]);
@@ -419,7 +438,9 @@ export function GameConfigTab({
     return () => {
       cancelled = true;
     };
-  }, [serverId, serverGame]);
+  // ovhcloudConfigFiles is intentionally included: changing the set of exposed files should re-run the effect
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverId, serverGame, serverProvider, ovhcloudConfigFiles?.join(',')]);
 
   useEffect(() => {
     if (configChanged) {
@@ -454,42 +475,6 @@ export function GameConfigTab({
       document.removeEventListener('pointerdown', handlePointerDown);
     };
   }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const loadGameUpdateConfig = async () => {
-      if (!serverId) {
-        setGameUpdateEnabled(false);
-        setGameUpdateError(null);
-        setGameUpdateLoading(false);
-        return;
-      }
-
-      setGameUpdateLoading(true);
-      setGameUpdateError(null);
-
-      try {
-        const response = await apiClient.getGameUpdateCron(serverId);
-        if (cancelled) return;
-        setGameUpdateEnabled(Boolean(response?.enabled));
-      } catch (error: any) {
-        if (cancelled) return;
-        const backendMessage = error?.response?.data?.error || error?.message;
-        setGameUpdateError(backendMessage || 'Failed to load game update configuration.');
-      } finally {
-        if (!cancelled) {
-          setGameUpdateLoading(false);
-        }
-      }
-    };
-
-    void loadGameUpdateConfig();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [serverId]);
 
   const openFileInFileManager = useCallback(
     (path: string) => {
@@ -528,24 +513,6 @@ export function GameConfigTab({
     checked: boolean
   ) => {
     handleFieldChange(fieldId, checked ? field.trueValue ?? 'true' : field.falseValue ?? 'false');
-  };
-
-  const handleToggleGameUpdate = async () => {
-    if (!serverId || !canManageGameUpdates || gameUpdateSaving) return;
-
-    setGameUpdateSaving(true);
-    setGameUpdateError(null);
-
-    try {
-      const response = await apiClient.updateGameUpdateCron(serverId, !gameUpdateEnabled);
-      const nextEnabled = Boolean(response?.enabled);
-      setGameUpdateEnabled(nextEnabled);
-    } catch (error: any) {
-      const backendMessage = error?.response?.data?.error || error?.message;
-      setGameUpdateError(backendMessage || 'Failed to update game update configuration.');
-    } finally {
-      setGameUpdateSaving(false);
-    }
   };
 
   const handleSaveConfiguration = async () => {
@@ -706,69 +673,29 @@ export function GameConfigTab({
     }
   };
 
-  const contentBg = 'bg-[#111827]';
+  const contentBg = 'bg-gp-surface-card';
   const borderColor = 'border-gray-700';
   const textPrimary = 'text-white';
   const textSecondary = 'text-gray-400';
-  const hasGameConfiguration = detectedConfigFiles.length > 0 || verifiedConfigFiles.length > 0;
+  const hasGameConfiguration = detectedConfigFiles.length > 0 || verifiedConfigFiles.length > 0 || Boolean(minecraftProps) || Boolean(hytaleProps) || Boolean(cs2Props);
   const showSaveSuccessToast = Boolean(saveSuccessMessage && !configChanged);
-  const showBottomStatusPanel = !canWriteFileManager || Boolean(saveError);
+  const showBottomStatusPanel = Boolean(saveError);
 
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden">
-      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-3 md:p-6">
-        <div className="w-full max-w-full md:max-w-4xl mx-auto space-y-3 md:space-y-6 pb-6">
-          <div className="space-y-4 px-1 sm:px-2 py-1">
-            <div className="space-y-2 pb-1">
-              <h3 className={`text-2xl font-bold ${textPrimary} mb-2`}>
-                Game Update Configuration
-              </h3>
-              <p className={`text-sm ${textSecondary}`}>
-                Enable or disable automatic update  (once per hour).
-              </p>
-            </div>
-
-            {gameUpdateLoading ? (
-              <div className={`flex items-center gap-2 text-sm ${textSecondary}`}>
-                <RefreshCw className="w-4 h-4 animate-spin" />
-                <span>Loading game update configuration...</span>
-              </div>
-            ) : (
-              <div className="flex items-center justify-between gap-4 px-1 py-2">
-                <span className={`text-sm sm:text-base font-medium ${textPrimary}`}>
-                  Automatic update
-                </span>
-                <AppToggle
-                  ariaLabel="Toggle automatic update checks"
-                  checked={gameUpdateEnabled}
-                  size="standard"
-                  disabled={!canManageGameUpdates || gameUpdateSaving}
-                  onChange={() => void handleToggleGameUpdate()}
-                  className="flex-shrink-0"
-                />
-              </div>
-            )}
-
-            {!canManageGameUpdates && (
-              <p className="text-xs text-amber-300">
-                Read-only mode: `server.gamesettings.write` permission is required.
-              </p>
-            )}
-
-            {gameUpdateError && (
-              <div className="flex items-center gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/30">
-                <AlertTriangle className="w-4 h-4 text-red-400" />
-                <p className={`text-sm ${textSecondary}`}>{gameUpdateError}</p>
-              </div>
-            )}
+      {configFilesLoading && !hasGameConfiguration && (
+        <div className="flex-1 flex items-center justify-center p-6">
+          <div className={`flex items-center gap-2 text-sm ${textSecondary}`}>
+            <RefreshCw className="w-4 h-4 animate-spin" />
+            <span>Loading game configuration...</span>
           </div>
+        </div>
+      )}
 
-          {hasGameConfiguration && (
-            <div className="space-y-5 pt-2 px-1 sm:px-2">
-              <div className="py-0">
-                <h3 className={`text-2xl font-bold ${textPrimary} mb-0`}>Game Configuration</h3>
-              </div>
-
+      {hasGameConfiguration && (
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-3 md:p-6">
+        <div className="w-full max-w-full md:max-w-4xl mx-auto space-y-3 pb-6">
+          {(configFilesLoading || verifiedConfigFiles.length > 0) && <div className="space-y-5 px-1 sm:px-2">
               {configFilesLoading && (
                 <div className={`flex items-center gap-2 text-sm ${textSecondary}`}>
                   <RefreshCw className="w-4 h-4 animate-spin" />
@@ -857,7 +784,7 @@ export function GameConfigTab({
                           return (
                             <div
                               key={fieldId}
-                              className={`rounded-lg border ${borderColor} bg-[#0f172a]/45 p-3 sm:p-4`}
+                              className={`rounded-lg border ${borderColor} bg-gp-surface-base/45 p-3 sm:p-4`}
                             >
                               <div className="grid grid-cols-1 sm:grid-cols-[minmax(185px,1.15fr)_minmax(0,1.1fr)] items-center gap-3 sm:gap-4">
                                 <div className="relative" data-game-config-help>
@@ -866,8 +793,8 @@ export function GameConfigTab({
                                   >
                                     <span className="break-all">{fieldLabel}</span>
                                     {fieldDescription && (
-                                      <button
-                                        type="button"
+                                      <AppButton
+                                        tone="ghost"
                                         aria-label={`Show info for ${fieldLabel}`}
                                         aria-expanded={openFieldHelpId === fieldId}
                                         onClick={() =>
@@ -878,12 +805,12 @@ export function GameConfigTab({
                                         className="inline-flex h-5 shrink-0 items-center justify-center px-0.5 text-[var(--color-cyan-400)]/80 transition-colors hover:text-[var(--color-cyan-400)]"
                                       >
                                         <Info className="h-3.5 w-3.5" />
-                                      </button>
+                                      </AppButton>
                                     )}
                                   </label>
                                   {fieldDescription && openFieldHelpId === fieldId && (
                                     <div className="absolute left-0 top-full z-20 mt-3 w-[280px] max-w-[calc(100vw-4rem)]">
-                                      <div className="absolute -top-1.5 left-4 h-3 w-3 rotate-45 border-l border-t border-gray-700/80 bg-[#0b1220]" />
+                                      <div className="absolute -top-1.5 left-4 h-3 w-3 rotate-45 border-l border-t border-gray-700/80 bg-gp-surface-input" />
                                       <div className="relative rounded-xl border border-gray-700/80 bg-[linear-gradient(180deg,rgba(15,23,42,0.98),rgba(11,18,32,0.98))] px-3.5 py-3 text-xs font-normal leading-relaxed text-gray-300 shadow-[0_18px_40px_rgba(2,6,23,0.45)] backdrop-blur-sm">
                                         {fieldDescription}
                                       </div>
@@ -924,8 +851,7 @@ export function GameConfigTab({
                                   ) : field.type === 'number' ? (
                                     shouldRenderSlider ? (
                                       <div className="space-y-1.5">
-                                        <input
-                                          type="range"
+                                        <AppSlider
                                           min={sliderMin}
                                           max={sliderMax}
                                           step={numberFieldStep}
@@ -946,7 +872,6 @@ export function GameConfigTab({
                                             )
                                           }
                                           aria-label={field.key}
-                                          className="gp-game-config-range w-full"
                                         />
                                         <div
                                           className={`grid grid-cols-3 items-center text-[11px] ${textSecondary}`}
@@ -969,7 +894,7 @@ export function GameConfigTab({
                                           onChange={(event) =>
                                             handleFieldChange(fieldId, event.target.value)
                                           }
-                                          className="w-full px-3 py-2 bg-[#1f2937] border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-[var(--color-cyan-400)]/40 focus:border-[var(--color-cyan-400)]"
+                                          className="w-full px-3 py-2 bg-gp-surface-elevated border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-[var(--color-cyan-400)]/40 focus:border-[var(--color-cyan-400)]"
                                         />
                                       </>
                                     )
@@ -980,7 +905,7 @@ export function GameConfigTab({
                                       onChange={(event) =>
                                         handleFieldChange(fieldId, event.target.value)
                                       }
-                                      className="w-full px-3 py-2 bg-[#1f2937] border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-[var(--color-cyan-400)]/40 focus:border-[var(--color-cyan-400)]"
+                                      className="w-full px-3 py-2 bg-gp-surface-elevated border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-[var(--color-cyan-400)]/40 focus:border-[var(--color-cyan-400)]"
                                     />
                                   )}
                                 </div>
@@ -997,9 +922,10 @@ export function GameConfigTab({
               {canWriteFileManager && verifiedConfigFiles.length > 0 && (
                 <div className="flex items-center justify-center gap-3 py-4 sm:py-5">
                   <AppButton
+                    tone="primary"
                     onClick={handleSaveConfiguration}
                     disabled={!configChanged || savingConfiguration || verifiedConfigFiles.length === 0}
-                    className="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-xl bg-[#0050D7] px-6 py-3 text-base font-semibold text-white transition-colors hover:bg-[#157EEA] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                    className="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-xl px-6 py-3 text-base font-semibold disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {savingConfiguration ? (
                       <RefreshCw className="h-4 w-4 animate-spin" />
@@ -1011,22 +937,66 @@ export function GameConfigTab({
                 </div>
               )}
 
-              <GameConfigAdvancedLinks
-                configFiles={detectedConfigFiles}
-                isLoading={configFilesLoading}
-                error={configFilesError}
-                canReadFileManager={canReadFileManager}
-                canWriteFileManager={canWriteFileManager}
-                onOpenFileManagerPath={openFileInFileManager}
+            </div>}
+
+          {minecraftProps && (
+            <div className="px-1 sm:px-2">
+              <MinecraftSections
+                {...minecraftProps}
+                advancedLinksNode={
+                  <GameConfigAdvancedLinks
+                    configFiles={detectedConfigFiles}
+                    isLoading={configFilesLoading}
+                    error={configFilesError}
+                    canReadFileManager={canReadFileManager}
+                    canWriteFileManager={canWriteFileManager}
+                    onOpenFileManagerPath={openFileInFileManager}
+                  />
+                }
               />
             </div>
           )}
+          {hytaleProps && (
+            <div className="px-1 sm:px-2">
+              <HytaleSections
+                {...hytaleProps}
+                advancedLinksNode={
+                  <GameConfigAdvancedLinks
+                    configFiles={detectedConfigFiles}
+                    isLoading={configFilesLoading}
+                    error={configFilesError}
+                    canReadFileManager={canReadFileManager}
+                    canWriteFileManager={canWriteFileManager}
+                    onOpenFileManagerPath={openFileInFileManager}
+                  />
+                }
+              />
+            </div>
+          )}
+
+          {cs2Props && (
+            <div className="px-1 sm:px-2">
+              <CS2Sections {...cs2Props} />
+            </div>
+          )}
+
+          {!minecraftProps && !hytaleProps && !cs2Props && (
+            <GameConfigAdvancedLinks
+              configFiles={detectedConfigFiles}
+              isLoading={configFilesLoading}
+              error={configFilesError}
+              canReadFileManager={canReadFileManager}
+              canWriteFileManager={canWriteFileManager}
+              onOpenFileManagerPath={openFileInFileManager}
+            />
+          )}
         </div>
       </div>
+      )}
 
       {showSaveSuccessToast && (
         <div className="pointer-events-none absolute bottom-4 right-4 z-20 flex w-[calc(100%-2rem)] justify-end sm:bottom-6 sm:right-6">
-          <div className="gp-log-prompt-toast w-full max-w-sm overflow-hidden rounded-2xl border border-emerald-500/30 bg-[linear-gradient(180deg,rgba(6,35,30,0.98)_0%,rgba(6,22,17,0.98)_100%)] shadow-[0_18px_48px_rgba(0,0,0,0.45)] backdrop-blur">
+          <div className="gp-log-prompt-toast gp-config-saved-toast w-full max-w-sm overflow-hidden rounded-2xl border border-emerald-500/30 bg-[linear-gradient(180deg,rgba(6,35,30,0.98)_0%,rgba(6,22,17,0.98)_100%)] shadow-[0_18px_48px_rgba(0,0,0,0.45)] backdrop-blur">
             <div className="flex items-start gap-3 p-4 sm:p-5">
               <div className="gp-log-prompt-toast-icon mt-0.5 rounded-xl bg-emerald-500/10 p-2.5 text-emerald-300 ring-1 ring-emerald-400/20">
                 <CheckCircle2 className="h-4 w-4" />
@@ -1044,15 +1014,6 @@ export function GameConfigTab({
         <div
           className={`sticky bottom-0 ${contentBg} border-t ${borderColor} p-3 md:p-6 md:-mx-6 space-y-3`}
         >
-          {!canWriteFileManager && (
-            <div className="flex items-center gap-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30">
-              <AlertTriangle className="w-4 h-4 text-amber-400" />
-              <p className={`text-sm ${textSecondary}`}>
-                Read-only mode: `fs.write` permission is required to save game settings.
-              </p>
-            </div>
-          )}
-
           {saveError && (
             <div className="flex items-center gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/30">
               <AlertTriangle className="w-4 h-4 text-red-400" />

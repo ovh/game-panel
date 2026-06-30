@@ -1,12 +1,22 @@
 import type { ServerMetricRow } from '../../types/database.js';
+import { daysAgoIso, nowIso } from '../../utils/time.js';
 import { BaseRepository } from './base.js';
 
 export class ServerMetricsRepository extends BaseRepository {
-  async create(serverId: number, cpuUsage: number, memoryUsage: number) {
+  async create(
+    serverId: number,
+    cpuUsage: number,
+    memoryUsage: number,
+    diskUsage: number,
+    networkIn: number,
+    networkOut: number
+  ) {
     const db = await this.ensureDb();
     const result = await db.run(
-      'INSERT INTO server_metrics (server_id, cpu_usage, memory_usage) VALUES (?, ?, ?)',
-      [serverId, cpuUsage, memoryUsage]
+      `INSERT INTO server_metrics
+       (server_id, timestamp, cpu_usage, memory_usage, disk_usage, network_in, network_out)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [serverId, nowIso(), cpuUsage, memoryUsage, diskUsage, networkIn, networkOut]
     );
     return result.lastID;
   }
@@ -15,8 +25,8 @@ export class ServerMetricsRepository extends BaseRepository {
     const db = await this.ensureDb();
     const result = await db.run(
       `DELETE FROM server_metrics
-       WHERE timestamp < datetime('now', ?)`,
-      [`-${days} day`]
+       WHERE timestamp < ?`,
+      [daysAgoIso(days)]
     );
     return result.changes ?? 0;
   }
@@ -27,10 +37,10 @@ export class ServerMetricsRepository extends BaseRepository {
       `SELECT *
        FROM server_metrics
        WHERE server_id = ?
-         AND timestamp >= datetime('now', ?)
+         AND timestamp >= ?
        ORDER BY timestamp DESC
        LIMIT ?`,
-      [serverId, `-${days} day`, limit]
+      [serverId, daysAgoIso(days), limit]
     );
   }
 }

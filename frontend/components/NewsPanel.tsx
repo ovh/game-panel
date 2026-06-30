@@ -5,6 +5,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Info,
+  Pause,
+  Play,
   RotateCw,
   Server,
   Settings,
@@ -55,9 +57,31 @@ const formatNewsDate = (timestamp: number): string => {
   });
 };
 
+const URL_REGEX = /(https?:\/\/[^\s]+)/g;
+
+function renderDescriptionWithLinks(text: string) {
+  const parts = text.split(URL_REGEX);
+  return parts.map((part, i) =>
+    URL_REGEX.test(part) ? (
+      <a
+        key={i}
+        href={part}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-[var(--color-cyan-400)] underline-offset-2 hover:underline"
+      >
+        {part}
+      </a>
+    ) : (
+      part
+    )
+  );
+}
+
 export function NewsPanel() {
   const [newsItems, setNewsItems] = useState<CatalogNewsItem[]>([]);
   const [currentNewsIndex, setCurrentNewsIndex] = useState(0);
+  const [isPaused, setIsPaused] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -86,14 +110,14 @@ export function NewsPanel() {
   }, []);
 
   useEffect(() => {
-    if (newsItems.length <= 1) return;
+    if (newsItems.length <= 1 || isPaused) return;
 
     const interval = window.setInterval(() => {
       setCurrentNewsIndex((prev) => (prev + 1) % newsItems.length);
     }, 5000);
 
     return () => window.clearInterval(interval);
-  }, [newsItems.length]);
+  }, [newsItems.length, isPaused]);
 
   useEffect(() => {
     if (newsItems.length === 0) {
@@ -146,11 +170,16 @@ export function NewsPanel() {
   };
 
   return (
-    <AppCard className="w-full overflow-hidden rounded-lg border border-gray-800">
-      <div className="relative flex flex-col sm:flex-row sm:items-center gap-3 p-4 pb-6 sm:pb-4 bg-gradient-to-r from-[#157EEA]/10 to-transparent">
+    <AppCard
+      className="w-full overflow-hidden rounded-lg border border-gray-800 shadow-[0_4px_20px_rgba(2,6,23,0.5),0_1px_4px_rgba(2,6,23,0.25)]"
+      role="region"
+      aria-label="News carousel"
+      aria-roledescription="carousel"
+    >
+      <div className="relative flex flex-col sm:flex-row sm:items-center gap-3 p-4 pb-6 sm:pb-4 bg-gradient-to-r from-[var(--gp-ods-accent-secondary)]/10 to-transparent">
         {currentNews ? (
           <>
-            <div className="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center bg-[#0050D7]/20 text-[var(--color-cyan-400)]">
+            <div className="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center bg-[var(--gp-ods-accent-primary)]/20 text-[var(--color-cyan-400)]">
               {getNewsIcon(currentNews.iconKey)}
             </div>
 
@@ -167,7 +196,7 @@ export function NewsPanel() {
                   {currentNewsIconKey}
                 </AppBadge>
               </div>
-              <p className="text-xs md:text-sm text-gray-400">{currentNews.description}</p>
+              <p className="text-xs md:text-sm text-gray-400">{renderDescriptionWithLinks(currentNews.description)}</p>
             </div>
 
             <div className="flex items-center gap-3 flex-shrink-0 w-full sm:w-auto justify-between sm:justify-start">
@@ -195,17 +224,31 @@ export function NewsPanel() {
                   >
                     <ChevronRight className="w-4 h-4 text-gray-400" />
                   </AppButton>
+                  <AppButton
+                    onClick={() => setIsPaused((v) => !v)}
+                    tone="ghost"
+                    className="h-7 w-7 rounded border-none bg-transparent p-1.5 transition-colors hover:bg-gray-700"
+                    aria-label={isPaused ? 'Resume auto-scroll' : 'Pause auto-scroll'}
+                    title={isPaused ? 'Resume' : 'Pause'}
+                  >
+                    {isPaused ? <Play className="w-3.5 h-3.5 text-gray-400" /> : <Pause className="w-3.5 h-3.5 text-gray-400" />}
+                  </AppButton>
                 </div>
               )}
             </div>
 
             {newsItems.length > 1 && (
-              <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1.5">
+              <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1.5" role="tablist" aria-label="News slides">
                 {newsItems.map((item, index) => (
-                  <div
+                  <button
+                    type="button"
                     key={item.id}
-                    className={`h-1.5 rounded-full transition-all ${
-                      index === currentNewsIndex ? 'bg-[#0050D7] w-6' : 'bg-gray-600 w-1.5'
+                    role="tab"
+                    aria-selected={index === currentNewsIndex}
+                    aria-label={`Go to news ${index + 1}: ${item.title}`}
+                    onClick={() => setCurrentNewsIndex(index)}
+                    className={`h-1.5 rounded-full transition-all border-0 p-0 cursor-pointer ${
+                      index === currentNewsIndex ? 'bg-[var(--gp-ods-accent-primary)] w-6' : 'bg-gray-600 w-1.5'
                     }`}
                   />
                 ))}
@@ -214,7 +257,7 @@ export function NewsPanel() {
           </>
         ) : (
           <>
-            <div className="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center bg-[#0050D7]/20 text-[var(--color-cyan-400)]">
+            <div className="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center bg-[var(--gp-ods-accent-primary)]/20 text-[var(--color-cyan-400)]">
               <Info className="w-5 h-5" />
             </div>
             <div className="flex-1 min-w-0">

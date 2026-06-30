@@ -1,37 +1,15 @@
-import { AuthenticatedWebSocket } from './types.js';
+import type { AuthenticatedWebSocket, WsTerminalMessage } from './types.js';
 import {
     attachTerminalSession,
-    captureConsoleSessionScrollback,
     detachTerminalSessionsForWs,
     getTerminalSession,
     onTerminalData,
     resizeTerminal,
     writeToTerminal,
 } from './terminalManager.js';
-import WebSocket from 'ws';
 import { serverMemberRepository } from '../database/index.js';
-
-function safeJsonSend(ws: AuthenticatedWebSocket, payload: unknown): void {
-    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));
-}
-
-function sendTerminalOutputChunked(
-    ws: AuthenticatedWebSocket,
-    sessionId: string,
-    payload: Buffer,
-    chunkSize = 24 * 1024
-): void {
-    if (!payload.length) return;
-
-    for (let offset = 0; offset < payload.length; offset += chunkSize) {
-        const chunk = payload.subarray(offset, Math.min(offset + chunkSize, payload.length));
-        safeJsonSend(ws, {
-            type: 'terminal:output',
-            sessionId,
-            dataB64: chunk.toString('base64'),
-        });
-    }
-}
+import { PERMISSIONS } from '../permissions.js';
+import { sendSafe } from './auth.js';
 
 async function hasTerminalPermission(ws: AuthenticatedWebSocket, serverId: number, perm: string): Promise<boolean> {
     if (ws.isRoot) return true;
@@ -49,19 +27,16 @@ async function assertTerminalAccess(
     ws: AuthenticatedWebSocket,
     session: any
 ): Promise<boolean> {
-    const isConsoleSession = session?.kind === 'console';
-
-    if (!isConsoleSession && !isOwnerOrRoot(ws, session)) {
-        safeJsonSend(ws, { type: 'terminal:error', error: 'forbidden' });
+    if (!isOwnerOrRoot(ws, session)) {
+        sendSafe(ws, { type: 'terminal:error', error: 'forbidden' });
         return false;
     }
 
     const serverId = Number(session?.serverId ?? 0);
     if (serverId) {
-        const perm = session?.kind === 'console' ? 'server.console' : 'ssh.terminal';
-        const ok = await hasTerminalPermission(ws, serverId, perm);
+        const ok = await hasTerminalPermission(ws, serverId, PERMISSIONS.container.terminal);
         if (!ok) {
-            safeJsonSend(ws, { type: 'terminal:error', error: 'insufficient_permissions' });
+            sendSafe(ws, { type: 'terminal:error', error: 'insufficient_permissions' });
             return false;
         }
     }
@@ -69,34 +44,38 @@ async function assertTerminalAccess(
     return true;
 }
 
-export async function handleTerminalWsMessage(ws: AuthenticatedWebSocket, msg: any): Promise<void> {
+export async function handleTerminalWsMessage(ws: AuthenticatedWebSocket, msg: WsTerminalMessage): Promise<void> {
     // msg.type: terminal:attach | terminal:input | terminal:resize
     if (!ws.userId) {
-        safeJsonSend(ws, { type: 'terminal:error', error: 'unauthorized' });
+        sendSafe(ws, { type: 'terminal:error', error: 'unauthorized' });
         return;
     }
 
     if (msg.type === 'terminal:attach') {
         const sessionId = String(msg.sessionId ?? '');
         if (!sessionId) {
-            safeJsonSend(ws, { type: 'terminal:error', error: 'missing sessionId' });
+            sendSafe(ws, { type: 'terminal:error', error: 'missing sessionId' });
             return;
         }
 
         const session = getTerminalSession(sessionId);
         if (!session) {
-            safeJsonSend(ws, { type: 'terminal:error', error: 'unknown session' });
+            sendSafe(ws, { type: 'terminal:error', error: 'unknown session' });
             return;
         }
 
         // Ownership gate (or root)
         if (!(await assertTerminalAccess(ws, session))) return;
 
-        const wsClientId = (ws as any)._gpClientId as string;
+        const wsClientId = ws.gpClientId;
+        if (!wsClientId) {
+            sendSafe(ws, { type: 'terminal:error', error: 'missing_client_id' });
+            return;
+        }
         attachTerminalSession(sessionId, wsClientId);
 
         const unsubscribe = onTerminalData(sessionId, (chunk) => {
-            safeJsonSend(ws, {
+            sendSafe(ws, {
                 type: 'terminal:output',
                 sessionId,
                 dataB64: chunk.toString('base64'),
@@ -107,22 +86,7 @@ export async function handleTerminalWsMessage(ws: AuthenticatedWebSocket, msg: a
         ws.terminalSubs[sessionId]?.();
         ws.terminalSubs[sessionId] = unsubscribe;
 
-        safeJsonSend(ws, { type: 'terminal:attached', sessionId });
-
-        if (session.kind === 'console') {
-            captureConsoleSessionScrollback(sessionId, {
-                maxLines: 1200,
-                maxBytes: 256 * 1024,
-            })
-                .then((scrollback) => {
-                    if (!scrollback.length) return;
-                    if (!getTerminalSession(sessionId)) return;
-                    sendTerminalOutputChunked(ws, sessionId, scrollback);
-                })
-                .catch(() => {
-                    // Ignore history replay failures; live stream remains available.
-                });
-        }
+        sendSafe(ws, { type: 'terminal:attached', sessionId });
 
         return;
     }
@@ -134,7 +98,7 @@ export async function handleTerminalWsMessage(ws: AuthenticatedWebSocket, msg: a
 
         const session = getTerminalSession(sessionId);
         if (!session) {
-            safeJsonSend(ws, { type: 'terminal:closed', sessionId });
+            sendSafe(ws, { type: 'terminal:closed', sessionId });
             return;
         }
 
@@ -145,7 +109,7 @@ export async function handleTerminalWsMessage(ws: AuthenticatedWebSocket, msg: a
         try {
             writeToTerminal(sessionId, buf);
         } catch {
-            safeJsonSend(ws, { type: 'terminal:closed', sessionId });
+            sendSafe(ws, { type: 'terminal:closed', sessionId });
         }
         return;
     }
@@ -177,6 +141,6 @@ export function cleanupTerminalWs(ws: AuthenticatedWebSocket): void {
         ws.terminalSubs = {};
     }
 
-    const wsClientId = (ws as any)._gpClientId as string;
+    const wsClientId = ws.gpClientId;
     if (wsClientId) detachTerminalSessionsForWs(wsClientId);
 }

@@ -1,0 +1,285 @@
+/*
+ * Game Panel — Light mode layer
+ *
+ * Overrides ods-dark.css when the .dark class is absent.
+ * Does NOT modify any dark-mode rule — purely additive.
+ *
+ * Palette: OVHcloud blue (#0050d7) as primary accent,
+ * clean whites/grays for surfaces, navy for text.
+ */
+
+@layer base {
+  html:not(.dark),
+  html:not(.dark) body {
+    --ods-theme-background-color: #f5f7fa;
+    --ods-theme-backdrop-background-color: rgba(0, 0, 0, 0.3);
+    --ods-theme-backdrop-opacity: 0.4;
+    --ods-theme-heading-text-color: #0f172a;
+    --ods-theme-overlay-z-index: 120;
+    --ods-theme-text-color: #475569;
+    --ods-theme-border-color-disabled: #e2e8f0;
+    --ods-theme-border-color-readonly: #e2e8f0;
+    --ods-theme-border-color-selected: var(--gp-ods-accent-primary);
+    --ods-theme-input-background-color-checked: var(--gp-ods-accent-primary);
+    --ods-theme-input-background-color-checked-hover: var(--gp-ods-accent-secondary);
+    --ods-theme-input-border-color: #cbd5e1;
+    --ods-theme-input-border-color-hover: #94a3b8;
+    --ods-theme-input-border-color-checked: var(--gp-ods-accent-primary);
+    --ods-theme-input-border-color-checked-hover: var(--gp-ods-accent-secondary);
+    --ods-theme-input-option-background-color-hover: #f0f4f8;
+    --ods-theme-input-option-background-color-selected: color-mix(in srgb, var(--gp-ods-accent-primary) 10%, transparent);
+    --ods-theme-input-option-background-color-selected-hover: color-mix(in srgb, var(--gp-ods-accent-primary) 16%, transparent);
+    --ods-theme-input-placeholder-text-color: #94a3b8;
+    --ods-theme-input-text-color: #0f172a;
+    --ods-theme-input-text-color-checked: #ffffff;
+    --ods-theme-split-border-color: #e2e8f0;
+    --ods-theme-anchor-text-color: var(--gp-ods-accent-primary);
+    --ods-theme-anchor-text-color-hover: var(--gp-primary-600);
+    --ods-color-form-element-background-default: #ffffff;
+    --ods-color-form-element-background-hover-default: #ffffff;
+    --ods-color-form-element-background-focus-default: #ffffff;
+    --ods-color-form-element-border-default: #cbd5e1;
+    --ods-color-form-element-border-hover-default: #94a3b8;
+    --ods-color-form-element-border-focus-default: var(--gp-ods-accent-primary);
+    --ods-color-form-element-text-default: #0f172a;
+    --ods-color-form-element-text-placeholder-default: #94a3b8;
+    --ods-theme-outline-color: var(--gp-ods-accent-primary);
+  }
+}
+
+@layer components {
+  /* ── Cards ── */
+  html:not(.dark) .gp-app-card[data-ods='card'] {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 0 0 1px rgba(0, 80, 215, 0.04) inset;
+    color: #0f172a;
+  }
+
+  /* ── Tables ── */
+  html:not(.dark) .gp-app-table[data-ods='table'] {
+    color: #0f172a;
+    --ods-table-border-color: #e2e8f0;
+    --ods-table-head-background-color: #f8fafc;
+    --ods-table-striped-background-color: #fafbfc;
+  }
+
+  html:not(.dark) .gp-app-table[data-ods='table'] th {
+    color: #64748b;
+    background: #f8fafc;
+  }
+
+  html:not(.dark) .gp-app-table[data-ods='table'] thead tr th {
+    background: #f8fafc;
+    color: #64748b;
+    border-color: #e2e8f0;
+  }
+
+  html:not(.dark) .gp-app-table[data-ods='table'] tbody tr td,
+  html:not(.dark) .gp-app-table[data-ods='table'] tbody tr th {
+    border-color: #e2e8f0;
+    color: #0f172a;
+  }
+
+  html:not(.dark) .gp-app-table[data-ods='table'] tr:hover {
+    background: rgba(0, 80, 215, 0.04);
+  }
+
+  /* ── Buttons ── */
+  html:not(.dark) .gp-app-button--secondary[data-ods='button'] {
+    color: #ffffff;
+  }
+
+  html:not(.dark) .gp-app-button--secondary[data-ods='button']:hover {
+    color: #ffffff;
+  }
+
+  html:not(.dark) .gp-app-button--primary[data-ods='button'] {
+    background: var(--gp-primary-700);
+    border-color: var(--gp-primary-700);
+    color: #ffffff;
+  }
+
+  html:not(.dark) .gp-app-button--primary[data-ods='button']:hover {
+    background: var(--gp-primary-600);
+    border-color: var(--gp-primary-600);
+    color: #ffffff;
+  }
+
+  html:not(.dark) .gp-app-button--critical[data-ods='button'] {
+    background: #dc2626;
+    border-color: #dc2626;
+    color: #ffffff;
+  }
+
+  html:not(.dark) .gp-app-button--critical[data-ods='button']:hover {
+    background: #b91c1c;
+    border-color: #b91c1c;
+    color: #ffffff;
+  }
+
+  html:not(.dark) .gp-app-button--critical[data-ods='button']:disabled,
+  html:not(.dark) .gp-app-button--critical[data-ods='button'][disabled] {
+    background: #fca5a5;
+    border-color: #fca5a5;
+    color: #7f1d1d;
+    opacity: 0.7;
+  }
+
+  html:not(.dark) .gp-app-button--neutral[data-ods='button'] {
+    background: #ffffff;
+    border-color: #cbd5e1;
+    color: #334155;
+    padding-inline: 1.25rem;
+    padding-block: 0.625rem;
+  }
+
+  html:not(.dark) .gp-app-button--neutral[data-ods='button']:hover {
+    border-color: var(--gp-ods-accent-primary);
+    color: var(--gp-ods-accent-primary);
+  }
+
+  html:not(.dark) .gp-app-button--ghost[data-ods='button'] {
+    color: #475569;
+  }
+
+  /* ── Badges ── */
+  html:not(.dark) .gp-status-badge--online[data-ods='badge'],
+  html:not(.dark) .gp-status-badge--healthy[data-ods='badge'],
+  html:not(.dark) .gp-status-badge--enabled[data-ods='badge'] {
+    background: rgba(22, 163, 74, 0.12);
+    color: #15803d;
+  }
+
+  html:not(.dark) .gp-status-badge--offline[data-ods='badge'],
+  html:not(.dark) .gp-status-badge--disabled[data-ods='badge'] {
+    background: rgba(100, 116, 139, 0.12);
+    color: #64748b;
+  }
+
+  html:not(.dark) .gp-status-badge--starting[data-ods='badge'],
+  html:not(.dark) .gp-status-badge--restarting[data-ods='badge'],
+  html:not(.dark) .gp-status-badge--info[data-ods='badge'] {
+    background: color-mix(in srgb, var(--gp-ods-accent-primary) 12%, transparent);
+    color: var(--gp-ods-accent-primary);
+  }
+
+  html:not(.dark) .gp-app-badge--07[data-ods='badge'] {
+    background: color-mix(in srgb, var(--gp-ods-accent-primary) 12%, transparent);
+    color: var(--gp-ods-accent-primary);
+  }
+
+  /* ── Inputs / Textareas ── */
+  html:not(.dark) .gp-app-input[data-ods='input'],
+  html:not(.dark) .gp-app-textarea[data-ods='textarea'] {
+    background: #ffffff;
+    border-color: #cbd5e1;
+    color: #0f172a;
+  }
+
+  /* ── Tabs ── */
+  html:not(.dark) .gp-app-tabs[data-ods='tabs'] [data-state='active'],
+  html:not(.dark) .gp-app-tabs[data-ods='tabs'] [aria-selected='true'] {
+    color: var(--gp-ods-accent-primary);
+  }
+
+  /* ── Modals ── */
+  html:not(.dark) .gp-app-modal-content[data-ods='modal-content'] {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    color: #0f172a;
+  }
+
+  /* ── Selects ── */
+  html:not(.dark) .gp-app-select-control[data-ods='select-control'] {
+    background: #ffffff;
+    border-color: #cbd5e1;
+    color: #0f172a;
+  }
+
+  html:not(.dark) .gp-resources-select[data-ods='select'] .gp-app-select-control[data-ods='select-control'] {
+    border-color: #cbd5e1;
+    background: #f8fafc;
+  }
+
+  html:not(.dark) .gp-resources-select[data-ods='select']
+    .gp-app-select-control[data-ods='select-control'][data-state='open'] {
+    box-shadow: 0 0 0 2px rgba(0, 80, 213, 0.2);
+  }
+
+  html:not(.dark) .gp-app-select[data-ods='select'] [data-ods='select-content'] {
+    background: #ffffff;
+    border-color: #e2e8f0;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.1);
+  }
+
+  html:not(.dark) .gp-app-select[data-ods='select'] [data-ods='select-content'] [role='option'] {
+    color: #0f172a;
+  }
+
+  html:not(.dark) .gp-app-select[data-ods='select'] [data-ods='select-content'] [role='option'][data-highlighted] {
+    background: #f0f4f8;
+  }
+
+  html:not(.dark) .gp-app-select[data-ods='select'] [data-ods='select-content'] [role='option'][data-state='checked'] {
+    background: color-mix(in srgb, var(--gp-ods-accent-primary) 10%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gp-ods-accent-primary) 25%, transparent);
+  }
+
+  html:not(.dark) .gp-app-select[data-ods='select']
+    [data-ods='select-content']
+    [role='option'][data-state='checked'][data-highlighted] {
+    background: color-mix(in srgb, var(--gp-ods-accent-primary) 16%, transparent);
+  }
+
+  /* ── Game config select ── */
+  html:not(.dark) .gp-game-config-select[data-ods='select'] .gp-app-select-control[data-ods='select-control'] {
+    border-color: #cbd5e1;
+    background: #ffffff;
+    box-shadow: inset 0 1px 0 rgba(0, 80, 215, 0.04);
+  }
+
+  html:not(.dark) .gp-game-config-select[data-ods='select'] .gp-app-select-control[data-ods='select-control']:hover {
+    border-color: #94a3b8;
+  }
+
+  html:not(.dark) .gp-game-config-select[data-ods='select']
+    .gp-app-select-control[data-ods='select-control'][data-state='open'] {
+    box-shadow:
+      inset 0 1px 0 rgba(0, 80, 215, 0.06),
+      0 0 0 2px rgba(0, 80, 215, 0.12);
+  }
+
+  html:not(.dark) .gp-game-config-select[data-ods='select'] [data-ods='select-content'] {
+    background: #ffffff;
+    border-color: #e2e8f0;
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.1);
+  }
+
+  /* ── Range slider ── */
+  html:not(.dark) .gp-game-config-range::-webkit-slider-thumb {
+    border: 2px solid #ffffff;
+  }
+
+  html:not(.dark) .gp-game-config-range::-moz-range-thumb {
+    border: 2px solid #ffffff;
+  }
+
+  /* ── Toggle ── */
+  html:not(.dark) .gp-app-toggle-control[data-ods='toggle-control'] {
+    --ods-toggle-control-background-color: #cbd5e1;
+    --ods-toggle-control-background-color-hover: #94a3b8;
+    --ods-toggle-control-border-color: #cbd5e1;
+    --ods-toggle-control-border-color-hover: #94a3b8;
+    --ods-toggle-control-thumb-background-color: #ffffff;
+  }
+
+  html:not(.dark) .gp-app-toggle[data-disabled] .gp-app-toggle-control[data-ods='toggle-control'] {
+    border-color: #e2e8f0;
+    background-color: #e2e8f0;
+  }
+
+  html:not(.dark) .gp-app-toggle-label[data-ods='toggle-label'] {
+    color: #475569;
+  }
+}

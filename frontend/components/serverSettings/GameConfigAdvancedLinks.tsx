@@ -71,7 +71,6 @@ function GameConfigAdvancedLinksComponent({
   isLoading,
   error,
   canReadFileManager,
-  canWriteFileManager,
   onOpenFileManagerPath,
 }: GameConfigAdvancedLinksProps) {
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -104,21 +103,9 @@ function GameConfigAdvancedLinksComponent({
         </AppButton>
       </div>
 
-      {showAdvanced && (
+      {showAdvanced && canReadFileManager && (
         <div className="space-y-3">
-          {!canReadFileManager ? (
-            <div className="text-sm text-red-300">
-              Access denied. `fs.read` permission is required to open advanced config files.
-            </div>
-          ) : (
-            <>
-              {!canWriteFileManager && (
-                <div className="text-xs text-amber-300">
-                  Read-only access detected. You can open files, but saving edits in File Manager
-                  requires `fs.write`.
-                </div>
-              )}
-
+          <>
               {isLoading && (
                 <div className={`flex items-center gap-2 text-sm ${textSecondary}`}>
                   <RefreshCw className="w-4 h-4 animate-spin" />
@@ -175,7 +162,6 @@ function GameConfigAdvancedLinksComponent({
                 </div>
               )}
             </>
-          )}
         </div>
       )}
     </div>

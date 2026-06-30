@@ -1,4 +1,5 @@
 import type { SystemMetricRow } from '../../types/database.js';
+import { daysAgoIso, nowIso } from '../../utils/time.js';
 import { BaseRepository } from './base.js';
 
 export class SystemMetricsRepository extends BaseRepository {
@@ -11,8 +12,8 @@ export class SystemMetricsRepository extends BaseRepository {
   ) {
     const db = await this.ensureDb();
     const result = await db.run(
-      'INSERT INTO system_metrics (cpu_usage, memory_usage, disk_usage, network_in, network_out) VALUES (?, ?, ?, ?, ?)',
-      [cpuUsage, memoryUsage, diskUsage, networkIn, networkOut]
+      'INSERT INTO system_metrics (timestamp, cpu_usage, memory_usage, disk_usage, network_in, network_out) VALUES (?, ?, ?, ?, ?, ?)',
+      [nowIso(), cpuUsage, memoryUsage, diskUsage, networkIn, networkOut]
     );
     return result.lastID;
   }
@@ -21,8 +22,8 @@ export class SystemMetricsRepository extends BaseRepository {
     const db = await this.ensureDb();
     const result = await db.run(
       `DELETE FROM system_metrics
-       WHERE timestamp < datetime('now', ?)`,
-      [`-${days} day`]
+       WHERE timestamp < ?`,
+      [daysAgoIso(days)]
     );
     return result.changes ?? 0;
   }
@@ -32,10 +33,10 @@ export class SystemMetricsRepository extends BaseRepository {
     return db.all<SystemMetricRow[]>(
       `SELECT *
        FROM system_metrics
-       WHERE timestamp >= datetime('now', ?)
+       WHERE timestamp >= ?
        ORDER BY timestamp DESC
        LIMIT ?`,
-      [`-${days} day`, limit]
+      [daysAgoIso(days), limit]
     );
   }
 }

@@ -1,13 +1,10 @@
 import { PassThrough } from 'stream';
 import { docker } from './client.js';
 
-/**
- * Executes a command inside a container and returns exit code + stdout/stderr.
- */
 export async function execInContainer(
     containerId: string,
     cmd: string[],
-    opts?: { workdir?: string; user?: string }
+    opts?: { workdir?: string; user?: string; env?: string[] }
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
     const container = docker.getContainer(containerId);
 
@@ -17,6 +14,7 @@ export async function execInContainer(
         AttachStderr: true,
         WorkingDir: opts?.workdir,
         User: opts?.user,
+        Env: opts?.env,
     });
 
     const stream = (await exec.start({ hijack: true, stdin: false })) as unknown as NodeJS.ReadableStream;

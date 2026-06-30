@@ -1,4 +1,5 @@
 import { BaseRepository } from './base.js';
+import { nowIso } from '../../utils/time.js';
 
 export type DbUserRow = {
   id: number;
@@ -7,6 +8,7 @@ export type DbUserRow = {
   global_permissions_json: string;
   is_root: number;
   is_enabled: number;
+  token_version: number;
   created_at: string;
   updated_at: string;
 };
@@ -24,7 +26,7 @@ export class UserRepository extends BaseRepository {
   async findByUsername(username: string): Promise<DbUserRow | undefined> {
     const db = await this.ensureDb();
     return db.get(
-      `SELECT id, username, password_hash, global_permissions_json, is_root, is_enabled, created_at, updated_at
+      `SELECT id, username, password_hash, global_permissions_json, is_root, is_enabled, token_version, created_at, updated_at
        FROM users
        WHERE LOWER(username) = LOWER(?)
        LIMIT 1`,
@@ -35,7 +37,7 @@ export class UserRepository extends BaseRepository {
   async findById(id: number): Promise<DbUserRow | undefined> {
     const db = await this.ensureDb();
     return db.get(
-      `SELECT id, username, password_hash, global_permissions_json, is_root, is_enabled, created_at, updated_at
+      `SELECT id, username, password_hash, global_permissions_json, is_root, is_enabled, token_version, created_at, updated_at
        FROM users
        WHERE id = ?`,
       [id]
@@ -52,10 +54,11 @@ export class UserRepository extends BaseRepository {
     const globalPermsJson = JSON.stringify(opts?.globalPermissions ?? []);
     const enabledInt = opts?.isEnabled === false ? 0 : 1;
 
+    const timestamp = nowIso();
     const result = await db.run(
-      `INSERT INTO users (username, password_hash, global_permissions_json, is_root, is_enabled)
-       VALUES (?, ?, ?, 0, ?)`,
-      [username, passwordHash, globalPermsJson, enabledInt]
+      `INSERT INTO users (username, password_hash, global_permissions_json, is_root, is_enabled, created_at, updated_at)
+       VALUES (?, ?, ?, 0, ?, ?, ?)`,
+      [username, passwordHash, globalPermsJson, enabledInt, timestamp, timestamp]
     );
 
     return result.lastID;
@@ -65,9 +68,9 @@ export class UserRepository extends BaseRepository {
     const db = await this.ensureDb();
     await db.run(
       `UPDATE users
-       SET password_hash = ?, updated_at = CURRENT_TIMESTAMP
+       SET password_hash = ?, token_version = token_version + 1, updated_at = ?
        WHERE id = ?`,
-      [passwordHash, id]
+      [passwordHash, nowIso(), id]
     );
   }
 
@@ -102,8 +105,8 @@ export class UserRepository extends BaseRepository {
     if (fields.length === 0) return;
 
     await db.run(
-      `UPDATE users SET ${fields.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-      [...values, id]
+      `UPDATE users SET ${fields.join(', ')}, updated_at = ? WHERE id = ?`,
+      [...values, nowIso(), id]
     );
   }
 

@@ -8,18 +8,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 escape_env_value() {
   local value="$1"
   value="${value//\\/\\\\}"
+  value="${value//\$/\$\$}"
   value="${value//\"/\\\"}"
   printf '"%s"' "$value"
-}
-
-json_string_or_null() {
-  local value="$1"
-  if [[ -z "$value" ]]; then
-    printf 'null'
-    return
-  fi
-
-  escape_env_value "$value"
 }
 
 is_valid_ipv4() {
@@ -310,22 +301,6 @@ read_app_version() {
   printf '%s' "$version"
 }
 
-detect_primary_host_ip() {
-  local candidate=""
-
-  while read -r candidate; do
-    if is_valid_ipv4 "$candidate" || is_valid_ipv6 "$candidate"; then
-      printf '%s' "$candidate"
-      return
-    fi
-  done < <(
-    {
-      detect_host_ipv4_candidates
-      detect_host_ipv6_candidates
-    } | unique_lines
-  )
-}
-
 prompt_required() {
   local current="$1"
   local prompt="$2"
@@ -425,44 +400,6 @@ sync_project_sources() {
     | tar -C "$APP_SOURCE_DIR" -xf -
 }
 
-install_host_agent() {
-  local source_agent="$APP_SOURCE_DIR/deploy/assets/host-agent/gamepanel-host-agent"
-  local source_service="$APP_SOURCE_DIR/deploy/assets/host-agent/gamepanel-host-agent.service"
-
-  [[ -f "$source_agent" ]] || die "Missing host-agent file: $source_agent"
-  [[ -f "$source_service" ]] || die "Missing host-agent service file: $source_service"
-
-  install -D -m 0755 "$source_agent" /usr/local/sbin/gamepanel-host-agent
-  install -D -m 0644 "$source_service" /etc/systemd/system/gamepanel-host-agent.service
-
-  systemctl daemon-reload
-  systemctl enable --now gamepanel-host-agent
-}
-
-reload_ssh_service() {
-  if systemctl list-unit-files | awk '{print $1}' | grep -qx 'ssh.service'; then
-    systemctl reload ssh
-    return
-  fi
-
-  if systemctl list-unit-files | awk '{print $1}' | grep -qx 'sshd.service'; then
-    systemctl reload sshd
-    return
-  fi
-
-  warn "Could not detect ssh/sshd service to reload. Reload SSH manually if needed."
-}
-
-install_sshd_match_config() {
-  local source_sshd_cfg="$APP_SOURCE_DIR/deploy/assets/sshd/gamepanel-sftp.conf"
-  [[ -f "$source_sshd_cfg" ]] || die "Missing SSHD config file: $source_sshd_cfg"
-
-  install -D -m 0644 "$source_sshd_cfg" /etc/ssh/sshd_config.d/gamepanel-sftp.conf
-  require_cmd sshd
-  sshd -t
-  reload_ssh_service
-}
-
 write_env_file() {
   local jwt_secret="$1"
   local instance_id="$2"
@@ -474,22 +411,17 @@ PORT=3001
 DOMAIN=$(escape_env_value "$DOMAIN")
 LETSENCRYPT_EMAIL=$(escape_env_value "$LETSENCRYPT_EMAIL")
 JWT_SECRET=$(escape_env_value "$jwt_secret")
-FRONTEND_URL=$(escape_env_value "https://$DOMAIN")
 ADMIN_USERNAME=$(escape_env_value "$ADMIN_USERNAME")
 ADMIN_PASSWORD=$(escape_env_value "$ADMIN_PASSWORD")
-GAMEPANEL_DB_DIR=/data
-GAMEPANEL_SERVERS_DIR=/opt/gamepanel/servers
+GAMEPANEL_APP_ROOT=$(escape_env_value "$APP_ROOT")
+GAMEPANEL_REPOSITORY_URL=https://github.com/ovh/game-panel.git
 DOCKER_SOCKET=/var/run/docker.sock
 TRUST_PROXY=$(escape_env_value "1")
-APP_USER=$(escape_env_value "$APP_USER")
-HOST_AGENT_SOCKET=/run/gamepanel/host-agent.sock
 APP_INSTANCE_ID=$(escape_env_value "$instance_id")
 APP_INSTANCE_SECRET=$(escape_env_value "$instance_secret")
 TELEMETRY_ENABLED=$(escape_env_value "$telemetry_enabled")
 TELEMETRY_API_BASE_URL=$(escape_env_value "$DB_API_BASE_URL")
-VITE_API_BASE_URL=$(escape_env_value "https://$DOMAIN")
 VITE_DB_API_BASE_URL=$(escape_env_value "$DB_API_BASE_URL")
-VITE_WS_URL=$(escape_env_value "wss://$DOMAIN/api")
 COMPOSE_PROJECT_NAME=$(escape_env_value "$COMPOSE_PROJECT_NAME")
 EOF
 
@@ -531,16 +463,14 @@ services:
     environment:
       NODE_ENV: production
       PORT: "${PORT}"
+      DOMAIN: "${DOMAIN}"
       JWT_SECRET: "${JWT_SECRET}"
-      FRONTEND_URL: "${FRONTEND_URL}"
       ADMIN_USERNAME: "${ADMIN_USERNAME}"
       ADMIN_PASSWORD: "${ADMIN_PASSWORD}"
-      GAMEPANEL_DB_DIR: "${GAMEPANEL_DB_DIR}"
-      GAMEPANEL_SERVERS_DIR: "${GAMEPANEL_SERVERS_DIR}"
+      GAMEPANEL_APP_ROOT: "${GAMEPANEL_APP_ROOT}"
+      GAMEPANEL_REPOSITORY_URL: "${GAMEPANEL_REPOSITORY_URL}"
       DOCKER_SOCKET: "${DOCKER_SOCKET}"
       TRUST_PROXY: "${TRUST_PROXY}"
-      APP_USER: "${APP_USER}"
-      HOST_AGENT_SOCKET: "${HOST_AGENT_SOCKET}"
       APP_INSTANCE_ID: "${APP_INSTANCE_ID}"
       APP_INSTANCE_SECRET: "${APP_INSTANCE_SECRET}"
       TELEMETRY_ENABLED: "${TELEMETRY_ENABLED}"
@@ -548,8 +478,7 @@ services:
     volumes:
       - "../data:/data"
       - "/var/run/docker.sock:/var/run/docker.sock"
-      - "/run/gamepanel:/run/gamepanel"
-      - "../servers:/opt/gamepanel/servers"
+      - "../servers:${GAMEPANEL_APP_ROOT}/servers"
     networks:
       - web
     restart: unless-stopped
@@ -566,9 +495,7 @@ services:
       context: ../app
       dockerfile: frontend/Dockerfile
       args:
-        VITE_API_BASE_URL: "${VITE_API_BASE_URL}"
         VITE_DB_API_BASE_URL: "${VITE_DB_API_BASE_URL}"
-        VITE_WS_URL: "${VITE_WS_URL}"
     networks:
       - web
     restart: unless-stopped
@@ -578,7 +505,7 @@ services:
       - "traefik.http.routers.gamepanel_front.entrypoints=websecure"
       - "traefik.http.routers.gamepanel_front.tls=true"
       - "traefik.http.routers.gamepanel_front.tls.certresolver=le"
-      - "traefik.http.services.gamepanel_front.loadbalancer.server.port=80"
+      - "traefik.http.services.gamepanel_front.loadbalancer.server.port=8080"
 
 networks:
   web:
@@ -592,7 +519,6 @@ EOF
 }
 
 send_installed_instance() {
-  local reported_ip="$1"
   local payload=""
   local response_file=""
   local status_code=""
@@ -608,7 +534,7 @@ send_installed_instance() {
   fi
 
   payload="$(cat <<EOF
-{"instanceId":$(escape_env_value "$APP_INSTANCE_ID"),"instanceSecret":$(escape_env_value "$APP_INSTANCE_SECRET"),"version":$(escape_env_value "$APP_VERSION"),"domain":$(escape_env_value "$DOMAIN"),"reportedIp":$(json_string_or_null "$reported_ip")}
+{"instanceId":$(escape_env_value "$APP_INSTANCE_ID"),"instanceSecret":$(escape_env_value "$APP_INSTANCE_SECRET"),"version":$(escape_env_value "$APP_VERSION"),"domain":$(escape_env_value "$DOMAIN")}
 EOF
 )"
   response_file="$(mktemp)"
@@ -705,6 +631,7 @@ main() {
 
   log "Using local source tree from $LOCAL_SOURCE_ROOT."
   SOURCE_ROOT="$LOCAL_SOURCE_ROOT"
+  assert_app_versions_match "$SOURCE_ROOT"
   APP_VERSION="$(read_app_version "$SOURCE_ROOT")"
 
   log "Installing Docker and Compose..."
@@ -719,12 +646,6 @@ main() {
   create_runtime_dirs
   sync_project_sources
 
-  log "Installing host-agent..."
-  install_host_agent
-
-  log "Installing SSH SFTP match config..."
-  install_sshd_match_config
-
   JWT_SECRET="${GP_JWT_SECRET:-$(generate_secret)}"
   APP_INSTANCE_ID="${GP_APP_INSTANCE_ID:-$(generate_uuid)}"
   APP_INSTANCE_SECRET="${GP_APP_INSTANCE_SECRET:-$(generate_secret)}"
@@ -733,15 +654,21 @@ main() {
   else
     TELEMETRY_ENABLED="false"
   fi
-  local reported_ip=""
-  reported_ip="$(detect_primary_host_ip || true)"
   write_env_file "$JWT_SECRET" "$APP_INSTANCE_ID" "$APP_INSTANCE_SECRET" "$TELEMETRY_ENABLED"
   write_compose_file
+
+  log "Pulling updater image..."
+  updater_image="ovhcom/gamepanel-updater:${APP_VERSION}"
+  if docker pull "$updater_image"; then
+    log "Updater image is available: $updater_image"
+  else
+    warn "Unable to pull updater image now: $updater_image"
+  fi
 
   log "Starting GamePanel stack..."
   compose_cmd up -d --build
   wait_for_stack
-  send_installed_instance "$reported_ip"
+  send_installed_instance
 
   printf '\n'
   log "Installation complete."

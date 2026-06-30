@@ -6,23 +6,24 @@ import {
 } from 'lucide-react';
 import { apiClient } from '../utils/api';
 import { CreateUserDialog } from './userAdministration/CreateUserDialog';
-import { DeleteUserDialog } from './userAdministration/DeleteUserDialog';
 import { UserEditDialog } from './userAdministration/UserEditDialog';
+import { ConfirmationModal } from './ConfirmationModal';
 import { UsersPanel } from './userAdministration/UsersPanel';
 import { AppButton } from '../src/ui/components';
 import {
   MAX_USERS,
-  SERVER_PRESETS,
+  ALL_PRESETS,
   globalPresetValues,
   normalizePermissions,
   samePermissionSet,
+  sanitizeServerPermissions,
   serverPresetValues,
   splitPermissions,
   stripWildcard,
 } from './userAdministration/utils';
 
 interface UserAdministrationProps {
-  servers: Array<{ id: string; name: string }>;
+  servers: Array<{ id: string; name: string; provider?: string; catalogId?: string }>;
   currentUserId?: number | null;
   canManageUsers?: boolean;
 }
@@ -74,7 +75,7 @@ export function UserAdministration({
 
   const [selectedServerId, setSelectedServerId] = useState('');
   const [members, setMembers] = useState<ServerMember[]>([]);
-  const [membersLoading, setMembersLoading] = useState(false);
+  const [, setMembersLoading] = useState(false);
   const [membersError, setMembersError] = useState<string | null>(null);
 
   const [addMemberUserId, setAddMemberUserId] = useState('');
@@ -87,11 +88,14 @@ export function UserAdministration({
         username: string;
       }
   >({ open: false });
-  const [deleteUserError, setDeleteUserError] = useState<string | null>(null);
 
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(
     null
   );
+  // Errors for the create/edit dialogs are shown inline inside the open modal,
+  // not via the page-level `feedback` banner (which would render behind it).
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [editError, setEditError] = useState<string | null>(null);
 
   const selectedUser = useMemo(
     () => users.find((u) => u.id === selectedUserId) ?? null,
@@ -126,9 +130,7 @@ export function UserAdministration({
     } catch (error: any) {
       setUsers([]);
       setUsersError(
-        error?.response?.status === 403
-          ? 'Access denied. users.manage global permission is required.'
-          : apiError(error, 'Failed to load users.')
+        apiError(error, 'Failed to load users.')
       );
     } finally {
       setUsersLoading(false);
@@ -182,7 +184,10 @@ export function UserAdministration({
   const allGlobalPerms = selectedUser?.isRoot
     ? normalizePermissions([...globalKnown])
     : stripWildcard(normalizePermissions([...globalKnown]));
-  const addMemberPerms = normalizePermissions([...addMemberKnown]);
+  // Only ever send canonical per-server permissions (no `*`, no unknown
+  // strings) — the backend now validates the array and rejects the whole
+  // request with a 400 otherwise.
+  const addMemberPerms = sanitizeServerPermissions(normalizePermissions([...addMemberKnown]));
 
   const resetCreateForm = useCallback(() => {
     setCreateUsername('');
@@ -192,24 +197,24 @@ export function UserAdministration({
 
   const handleCreateUser = async () => {
     if (userLimitReached) {
-      setFeedback({ type: 'error', text: `User limit reached (${MAX_USERS} max).` });
+      setCreateError(`User limit reached (${MAX_USERS} max).`);
       return;
     }
     const usernameValue = createUsername.trim();
     if (!usernameValue || !createPassword || !createPasswordConfirm) {
-      setFeedback({ type: 'error', text: 'Username and password are required.' });
+      setCreateError('Username and password are required.');
       return;
     }
     if (createPassword.length < 8) {
-      setFeedback({ type: 'error', text: 'Password must be at least 8 characters.' });
+      setCreateError('Password must be at least 8 characters.');
       return;
     }
     if (createPassword !== createPasswordConfirm) {
-      setFeedback({ type: 'error', text: 'Password confirmation does not match.' });
+      setCreateError('Password confirmation does not match.');
       return;
     }
     setCreateLoading(true);
-    setFeedback(null);
+    setCreateError(null);
     try {
       const res = await apiClient.createUser(
         usernameValue,
@@ -227,7 +232,7 @@ export function UserAdministration({
         text: `User ${res.user?.username || usernameValue} created successfully.`,
       });
     } catch (error: any) {
-      setFeedback({ type: 'error', text: apiError(error, 'Failed to create user.') });
+      setCreateError(apiError(error, 'Failed to create user.'));
     } finally {
       setCreateLoading(false);
     }
@@ -235,40 +240,41 @@ export function UserAdministration({
 
   useEffect(() => {
     if (!createModalOpen) return;
+    setCreateError(null);
     resetCreateForm();
   }, [createModalOpen, resetCreateForm]);
 
   const handleSaveEdit = async () => {
     if (!selectedUser) return;
     if (selectedUser.isRoot) {
-      setFeedback({ type: 'error', text: 'Super Admin account cannot be edited here.' });
+      setEditError('Super Admin account cannot be edited here.');
       return;
     }
 
     const trimmedUsername = username.trim();
     if (!trimmedUsername) {
-      setFeedback({ type: 'error', text: 'Username is required.' });
+      setEditError('Username is required.');
       return;
     }
 
     const shouldResetPassword = newPassword.length > 0 || newPasswordConfirm.length > 0;
     if (shouldResetPassword) {
       if (newPassword.length < 8) {
-        setFeedback({ type: 'error', text: 'Password must be at least 8 characters.' });
+        setEditError('Password must be at least 8 characters.');
         return;
       }
       if (!newPasswordConfirm) {
-        setFeedback({ type: 'error', text: 'Please confirm the new password.' });
+        setEditError('Please confirm the new password.');
         return;
       }
       if (newPassword !== newPasswordConfirm) {
-        setFeedback({ type: 'error', text: 'Password confirmation does not match.' });
+        setEditError('Password confirmation does not match.');
         return;
       }
     }
 
     setSaveEditLoading(true);
-    setFeedback(null);
+    setEditError(null);
     try {
       await apiClient.updateUser(selectedUser.id, {
         username: trimmedUsername,
@@ -308,7 +314,7 @@ export function UserAdministration({
       setEditModalOpen(false);
       setFeedback({ type: 'success', text: 'User changes saved successfully.' });
     } catch (error: any) {
-      setFeedback({ type: 'error', text: apiError(error, 'Failed to save user changes.') });
+      setEditError(apiError(error, 'Failed to save user changes.'));
     } finally {
       setSaveEditLoading(false);
     }
@@ -320,7 +326,6 @@ export function UserAdministration({
       return;
     }
     setSelectedUserId(user.id);
-    setDeleteUserError(null);
     setDeleteUserConfirm({
       open: true,
       userId: user.id,
@@ -334,19 +339,16 @@ export function UserAdministration({
     const usernameToDelete = deleteUserConfirm.username;
 
     setDeleteUserLoading(true);
-    setDeleteUserError(null);
     setFeedback(null);
     try {
       await apiClient.deleteUser(userId);
       await loadUsers();
       if (selectedServerId) await loadMembers(selectedServerId);
       setEditModalOpen(false);
-      setDeleteUserConfirm({ open: false });
       setFeedback({ type: 'success', text: `User ${usernameToDelete} deleted.` });
     } catch (error: any) {
-      const message = apiError(error, 'Failed to delete user.');
-      setDeleteUserError(message);
-      setFeedback({ type: 'error', text: message });
+      // Rethrow so ConfirmationModal surfaces the error inline and stays open.
+      throw new Error(apiError(error, 'Failed to delete user.'));
     } finally {
       setDeleteUserLoading(false);
     }
@@ -367,7 +369,7 @@ export function UserAdministration({
   }, [addMemberUserId, members]);
 
   const applyAddPreset = (presetId: string) => {
-    const preset = SERVER_PRESETS.find((x) => x.id === presetId);
+    const preset = ALL_PRESETS.find((x) => x.id === presetId);
     if (!preset) return;
     setAddMemberKnown(normalizePermissions(preset.permissions));
   };
@@ -377,6 +379,7 @@ export function UserAdministration({
       setFeedback({ type: 'error', text: 'Super Admin account cannot be edited here.' });
       return;
     }
+    setEditError(null);
     setSelectedUserId(user.id);
     setAddMemberUserId(String(user.id));
     setUsername(user.username);
@@ -386,23 +389,27 @@ export function UserAdministration({
     setGlobalKnown(known);
     setNewPassword('');
     setNewPasswordConfirm('');
+    // Reset server permissions from current server state to avoid stale state
+    // when reopening the dialog for the same user without saving.
+    const existingMember = members.find((m) => String(m.userId) === String(user.id));
+    if (!existingMember) {
+      setAddMemberKnown([]);
+    } else {
+      const { known: memberKnown } = splitPermissions(existingMember.permissions, serverPresetValues);
+      setAddMemberKnown(memberKnown);
+    }
     setEditModalOpen(true);
   };
 
   if (!canManageUsers) {
-    return (
-      <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300">
-        Access denied. The global permission <span className="font-semibold">users.manage</span> is
-        required.
-      </div>
-    );
+    return null;
   }
 
   return (
     <div className="mx-auto w-full max-w-[1140px] space-y-6">
       {feedback && (
         <div
-          className={`rounded-lg border px-4 py-3 text-sm ${feedback.type === 'success' ? 'border-green-500/30 bg-green-500/10 text-green-300' : 'border-red-500/30 bg-red-500/10 text-red-300'}`}
+          className={`rounded-lg border px-4 py-3 text-sm ${feedback.type === 'success' ? 'border-green-600/40 bg-green-500/10 text-green-700 dark:text-green-300' : 'border-red-600/40 bg-red-500/10 text-red-700 dark:text-red-300'}`}
         >
           <div className="flex items-center gap-2">
             {feedback.type === 'success' ? (
@@ -439,8 +446,11 @@ export function UserAdministration({
             open={createModalOpen}
             onOpenChange={(open) => {
               setCreateModalOpen(open);
-              if (!open && !createLoading) {
-                resetCreateForm();
+              if (!open) {
+                setCreateError(null);
+                if (!createLoading) {
+                  resetCreateForm();
+                }
               }
             }}
             createLoading={createLoading}
@@ -452,6 +462,7 @@ export function UserAdministration({
             createPasswordConfirm={createPasswordConfirm}
             setCreatePasswordConfirm={setCreatePasswordConfirm}
             onCreateUser={handleCreateUser}
+            error={createError}
           />
 
           <UserEditDialog
@@ -461,9 +472,9 @@ export function UserAdministration({
               if (!open) {
                 setNewPassword('');
                 setNewPasswordConfirm('');
+                setEditError(null);
                 if (!deleteUserLoading) {
                   setDeleteUserConfirm({ open: false });
-                  setDeleteUserError(null);
                 }
               }
             }}
@@ -491,18 +502,25 @@ export function UserAdministration({
             membersError={membersError}
             onSaveChanges={handleSaveEdit}
             saveLoading={saveEditLoading}
+            saveError={editError}
           />
 
-          <DeleteUserDialog
-            state={deleteUserConfirm}
-            deleteUserLoading={deleteUserLoading}
-            deleteUserError={deleteUserError}
+          <ConfirmationModal
+            isOpen={deleteUserConfirm.open}
             onClose={() => {
               if (deleteUserLoading) return;
               setDeleteUserConfirm({ open: false });
-              setDeleteUserError(null);
             }}
             onConfirm={confirmDeleteUser}
+            title="Delete User"
+            message={
+              deleteUserConfirm.open
+                ? `Delete "${deleteUserConfirm.username}" now? This action permanently deletes the account and cannot be undone.`
+                : 'This action permanently deletes the account and cannot be undone.'
+            }
+            confirmText="Delete"
+            confirmButtonClass="bg-red-600 hover:bg-red-700"
+            requiredText={deleteUserConfirm.open ? deleteUserConfirm.username : undefined}
           />
 
           <UsersPanel

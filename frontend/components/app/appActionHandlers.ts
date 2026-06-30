@@ -1,4 +1,4 @@
-import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
+import type { Dispatch, SetStateAction } from 'react';
 import type { CLIMessage } from '../../types/cli';
 import type { GameServer } from '../../types/gameServer';
 import { apiClient } from '../../utils/api';
@@ -15,15 +15,24 @@ type CanAccessServer = (serverId: string | number, permission: string) => boolea
 type ResolveServerName = (serverId: number | string, fallback?: string) => string;
 
 export interface InstallGameHandlerPayload {
-  gameKey: string;
-  serverName: string;
-  gameServerName: string;
-  ports?: any;
-  portLabels?: { tcp?: Record<string, string>; udp?: Record<string, string> };
-  healthcheck?: { type: string; port?: number; name?: string };
+  provider: 'ovhcloud' | 'linuxgsm' | 'external';
+  name: string;
+  shortname?: string;
+  imageId?: string;
+  dockerImage?: string;
+  imageOptions?: { patchline?: string; profileUuid?: string | null };
+  runtimeIdentity?: { user: string; uid: number; gid: number };
+  ports: {
+    tcp: { host: number; container: number; label: string }[];
+    udp: { host: number; container: number; label: string }[];
+  };
+  healthcheck: null | { mode: 'disabled' } | { mode: 'override'; type: string; port?: number; interval?: number; timeout?: number; retries?: number; startPeriod?: number };
+  mounts?: { key: string; containerPath: string }[];
+  env?: Record<string, string>;
   requireSteamCredentials?: boolean;
   steamUsername?: string;
   steamPassword?: string;
+  resourceLimits?: { memoryMb: number; cpu: number } | null;
 }
 
 interface CreateDeleteServerHandlerDeps {
@@ -38,17 +47,19 @@ export const createDeleteServerHandler =
   async (id: string) => {
     const server = gameServers.find((s) => s.id === id);
     if (!canAccessServer(id, 'server.delete')) {
-      addCLIMessage('error', 'Permission denied: server.delete is required.', server?.name);
+      addCLIMessage('error', "You don't have permission to delete this server", server?.name);
       return;
     }
     try {
       await apiClient.deleteServer(parseInt(id, 10));
       removeServerFromUi(id);
-      addCLIMessage('success', `Server ${server?.name} deleted`, server?.name, 'delete');
+      addCLIMessage('success', `${server?.name} was deleted`, server?.name, 'delete');
     } catch (error: any) {
       addCLIMessage('error', error.response?.data?.error || 'Failed to delete server', server?.name);
     }
   };
+
+import type { InstallStep } from '../../types/gameServer';
 
 interface CreateInstallGameHandlerDeps {
   canInstallServers: boolean;
@@ -58,6 +69,7 @@ interface CreateInstallGameHandlerDeps {
   setInstallServerId: Dispatch<SetStateAction<number | null>>;
   setInstallProgressPercent: Dispatch<SetStateAction<number | null>>;
   setInstallStatus: Dispatch<SetStateAction<string | null>>;
+  setInstallPlan: Dispatch<SetStateAction<InstallStep[]>>;
   refreshInstallPermissions: () => Promise<void>;
 }
 
@@ -70,23 +82,15 @@ export const createInstallGameHandler =
     setInstallServerId,
     setInstallProgressPercent,
     setInstallStatus,
+    setInstallPlan,
     refreshInstallPermissions,
   }: CreateInstallGameHandlerDeps) =>
-  async ({
-    gameKey,
-    serverName,
-    gameServerName,
-    ports,
-    portLabels,
-    healthcheck,
-    requireSteamCredentials,
-    steamUsername,
-    steamPassword,
-  }: InstallGameHandlerPayload) => {
+  async (payload: InstallGameHandlerPayload) => {
+    const { name } = payload;
     if (!canInstallServers) {
       addCLIMessage(
         'error',
-        'Permission denied: server.install global permission is required.',
+        "You don't have permission to install servers",
         'System',
         'install'
       );
@@ -97,26 +101,11 @@ export const createInstallGameHandler =
     setInstallServerId(null);
     setInstallProgressPercent(0);
     setInstallStatus('pending');
+    setInstallPlan([]);
     try {
-      addCLIMessage('info', `[INSTALL] Starting installation of ${gameKey}...`, serverName, 'install');
-      addCLIMessage('info', `[INSTALL] Server Name: ${serverName}`, serverName, 'install');
-      addCLIMessage('info', `[INSTALL] Game: ${gameKey}`, serverName, 'install');
-      addCLIMessage('info', '[INSTALL] Downloading LinuxGSM script...', serverName, 'install');
+      addCLIMessage('info', `Installing ${name}...`, name, 'install');
 
-      const startTime = Date.now();
-      addCLIMessage('info', '[API] Calling backend API: POST /api/servers/install', serverName, 'install');
-
-      const response = await apiClient.installServer(
-        gameKey,
-        serverName,
-        gameServerName,
-        ports,
-        portLabels,
-        healthcheck,
-        requireSteamCredentials,
-        steamUsername,
-        steamPassword
-      );
+      const response = await apiClient.installServer(payload);
       void refreshInstallPermissions();
 
       const createdId = response?.server?.id ?? response?.id;
@@ -124,27 +113,16 @@ export const createInstallGameHandler =
         const newServerId = Number(createdId);
         setInstallServerId(newServerId);
         apiClient.subscribeInstall(newServerId);
-        addCLIMessage(
-          'info',
-          `[WS] Subscribed to install progress (server ID ${newServerId})`,
-          serverName,
-          'install'
-        );
       }
-
-      const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-      addCLIMessage('info', `[TIMER] Installation request accepted in ${duration}s`, serverName, 'install');
-      addCLIMessage('info', '[INSTALL] Awaiting real-time install updates...', serverName, 'install');
-      addCLIMessage('info', `[INSTALL] Server ID: ${createdId ?? 'N/A'}`, serverName, 'install');
     } catch (error: any) {
       addCLIMessage(
         'error',
-        `[ERROR] Installation failed: ${error.response?.data?.error || error.message}`,
-        serverName,
+        `Installation failed: ${error.response?.data?.error || error.message}`,
+        name,
         'install'
       );
       if (error.response?.data?.details) {
-        addCLIMessage('error', `Details: ${error.response.data.details}`, serverName, 'install');
+        addCLIMessage('error', error.response.data.details, name, 'install');
       }
       setInstallError(error.response?.data?.error || error.message);
       setInstallStatus('failed');
@@ -159,8 +137,6 @@ interface CreateServerActionHandlerDeps {
   setOpenConsoleTabs: Dispatch<SetStateAction<string[]>>;
   setActiveConsoleTab: Dispatch<SetStateAction<string | null>>;
   openServerConsole: (serverId: number) => void;
-  setConsoleReadyByServer: Dispatch<SetStateAction<Record<string, boolean | null>>>;
-  consoleReadyRef: MutableRefObject<Record<string, boolean | null>>;
   serverLogHistoryLimit: number;
 }
 
@@ -172,31 +148,26 @@ export const createServerActionHandler =
     setOpenConsoleTabs,
     setActiveConsoleTab,
     openServerConsole,
-    setConsoleReadyByServer,
-    consoleReadyRef,
     serverLogHistoryLimit,
   }: CreateServerActionHandlerDeps) =>
   async (serverId: string, serverName: string, action: string) => {
     try {
-      const startTime = Date.now();
-      addCLIMessage('info', `[ACTION] Executing ${action} on ${serverName}...`, serverName, action);
-
       if (
         (action === 'start' || action === 'stop' || action === 'restart') &&
         !canAccessServer(serverId, 'server.power')
       ) {
         addCLIMessage(
           'error',
-          '[ERROR] Permission denied: server.power is required.',
+          "You don't have permission to control this server",
           serverName,
           action
         );
         return;
       }
-      if (action === 'console' && !canAccessServer(serverId, 'server.logs.read')) {
+      if (action === 'console' && !canAccessServer(serverId, 'container.logs.read')) {
         addCLIMessage(
           'error',
-          '[ERROR] Permission denied: server.logs.read is required.',
+          "You don't have permission to view this server's logs",
           serverName,
           action
         );
@@ -206,13 +177,7 @@ export const createServerActionHandler =
       switch (action) {
         case 'start': {
           await apiClient.startServer(parseInt(serverId, 10));
-          const startDuration = ((Date.now() - startTime) / 1000).toFixed(2);
-          addCLIMessage(
-            'success',
-            `[OK] Server ${serverName} started (${startDuration}s)`,
-            serverName,
-            'start'
-          );
+          addCLIMessage('success', `${serverName} started`, serverName, 'start');
           if (openConsoleTabs.includes(serverId)) {
             setTimeout(() => {
               apiClient.subscribeLogs(parseInt(serverId, 10), serverLogHistoryLimit);
@@ -224,32 +189,20 @@ export const createServerActionHandler =
         case 'stop': {
           await apiClient.stopServer(parseInt(serverId, 10));
           apiClient.unsubscribeLogs(parseInt(serverId, 10));
-          consoleReadyRef.current[serverId] = false;
-          setConsoleReadyByServer((prev) => ({
-            ...prev,
-            [serverId]: false,
-          }));
-          const stopDuration = ((Date.now() - startTime) / 1000).toFixed(2);
-          addCLIMessage(
-            'success',
-            `[OK] Server ${serverName} stopped (${stopDuration}s)`,
-            serverName,
-            'stop'
-          );
+          addCLIMessage('success', `${serverName} stopped`, serverName, 'stop');
           break;
         }
 
         case 'debug': {
-          if (!canAccessServer(serverId, 'server.logs.read')) {
+          if (!canAccessServer(serverId, 'container.logs.read')) {
             addCLIMessage(
               'error',
-              '[ERROR] Permission denied: server.logs.read is required.',
+              "You don't have permission to view this server's logs",
               serverName,
               'debug'
             );
             break;
           }
-          addCLIMessage('info', `[WS] WebSocket: subscribe logs for ${serverName}`, serverName, 'debug');
           apiClient.subscribeLogs(parseInt(serverId, 10), serverLogHistoryLimit);
           setActiveConsoleTab(serverId);
           if (!openConsoleTabs.includes(serverId)) {
@@ -259,20 +212,13 @@ export const createServerActionHandler =
         }
 
         case 'console':
-          addCLIMessage('info', 'Subscribing to logs via WebSocket...', serverName, 'console');
           openServerConsole(parseInt(serverId, 10));
           break;
 
         case 'restart': {
           apiClient.unsubscribeLogs(parseInt(serverId, 10));
           await apiClient.restartServer(parseInt(serverId, 10));
-          const restartDuration = ((Date.now() - startTime) / 1000).toFixed(2);
-          addCLIMessage(
-            'success',
-            `[OK] Server ${serverName} restarting... (${restartDuration}s)`,
-            serverName,
-            'restart'
-          );
+          addCLIMessage('success', `${serverName} is restarting...`, serverName, 'restart');
           if (openConsoleTabs.includes(serverId)) {
             setTimeout(() => {
               apiClient.subscribeLogs(parseInt(serverId, 10), serverLogHistoryLimit);
@@ -282,23 +228,15 @@ export const createServerActionHandler =
         }
 
         default:
-          addCLIMessage('warning', `[WARN] Action ${action} not implemented`, serverName, action);
+          break;
       }
     } catch (error: any) {
       addCLIMessage(
         'error',
-        `[ERROR] API Error: ${error.response?.data?.error || error.message}`,
+        `Action failed: ${error.response?.data?.error || error.message}`,
         serverName,
         action
       );
-      if (error.response?.status) {
-        addCLIMessage(
-          'error',
-          `HTTP ${error.response.status}: ${error.response.statusText}`,
-          serverName,
-          action
-        );
-      }
     }
   };
 
@@ -315,13 +253,13 @@ export const createRenameServerHandler =
     if (!trimmedName) return;
 
     try {
-      await apiClient.updateServer(Number(id), { serverName: trimmedName });
+      await apiClient.updateServer(Number(id), { name: trimmedName });
       setGameServers((prev) =>
         prev.map((server) => (server.id === id ? { ...server, name: trimmedName } : server))
       );
       addCLIMessage(
         'success',
-        `[OK] Server renamed to "${trimmedName}"`,
+        `Server renamed to "${trimmedName}"`,
         resolveServerName(id, trimmedName),
         'rename'
       );
@@ -343,9 +281,8 @@ export const createRefreshServerSnapshotHandler =
   ({ addCLIMessage }: CreateRefreshServerSnapshotHandlerDeps) =>
   async () => {
     try {
-      addCLIMessage('info', 'Refreshing server list...', 'System', 'refresh');
       apiClient.subscribeServers();
-      addCLIMessage('success', 'Servers refreshed successfully!', 'System', 'refresh');
+      addCLIMessage('success', 'Server list refreshed', 'System', 'refresh');
     } catch (error: any) {
       addCLIMessage(
         'error',
@@ -379,7 +316,7 @@ export const createStartAllHandler =
       timestamp,
       server: 'System',
       action: 'start-all',
-      message: `[OK] Starting all servers...\n  ${affectedServers.length} server(s) marked as starting.`,
+      message: `Starting all servers... (${affectedServers.length} server${affectedServers.length !== 1 ? 's' : ''})`,
       type: 'success',
     };
     setCliMessages((prev) => [...prev, newMessage]);
@@ -408,7 +345,7 @@ export const createStopAllHandler =
       timestamp,
       server: 'System',
       action: 'stop-all',
-      message: `[OK] Stopping all servers...\\n  ${affectedServers.length} server(s) marked as stopping.`,
+      message: `Stopping all servers... (${affectedServers.length} server${affectedServers.length !== 1 ? 's' : ''})`,
       type: 'warning',
     };
     setCliMessages((prev) => [...prev, newMessage]);

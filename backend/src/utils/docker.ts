@@ -1,9 +1,18 @@
 export {
   pullImageByName,
+  imageExists,
+  buildManagedContainerName,
   createContainer,
+  startContainer,
+  stopContainer,
+  restartContainer,
+  updateContainerResourceLimits,
   removeContainer,
+  removeManagedContainersForServer,
+  listPublishedHostPorts,
   checkContainerStatus,
   inspectContainerRuntime,
+  runOneShotContainer,
 } from './docker/containers.js';
 
 export { execInContainer } from './docker/exec.js';

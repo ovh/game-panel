@@ -1,10 +1,8 @@
 import os from 'os';
 import fs from 'fs/promises';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
 import { logError } from './logger.js';
-
-const execFileAsync = promisify(execFile);
+import { getCachedHostDiskUsagePercent } from './diskUsage.js';
+import { round2 } from './number.js';
 
 type CpuSample = { idle: number; total: number; timestamp: number };
 type NetSample = { rx: number; tx: number; timestamp: number };
@@ -17,14 +15,7 @@ function clampPercent(value: number): number {
   return Math.max(0, Math.min(100, value));
 }
 
-function round2(value: number): number {
-  return Math.round(value * 100) / 100;
-}
-
-/**
- * Reads a CPU sample from Node's OS API (cumulative ticks since boot).
- * We then compute usage as a delta between samples to get a meaningful percentage.
- */
+// Reads a CPU sample from Node's OS API (cumulative ticks since boot).
 function readCpuSample(): CpuSample {
   const cpuStats = os.cpus();
   let totalIdle = 0;
@@ -44,10 +35,7 @@ function readCpuSample(): CpuSample {
   };
 }
 
-/**
- * Returns CPU usage percentage based on two consecutive samples.
- * First call returns 0 (no previous sample to compare).
- */
+// Returns CPU usage percentage based on two consecutive samples.
 async function getCPUUsage(): Promise<number> {
   try {
     const current = readCpuSample();
@@ -72,9 +60,7 @@ async function getCPUUsage(): Promise<number> {
   }
 }
 
-/**
- * Returns memory usage percentage (used / total).
- */
+// Returns memory usage percentage (used / total).
 async function getMemoryUsage(): Promise<number> {
   try {
     const totalMemory = os.totalmem();
@@ -90,37 +76,7 @@ async function getMemoryUsage(): Promise<number> {
   }
 }
 
-/**
- * Returns disk usage percentage for the root filesystem using `df`.
- * Uses POSIX output (-P) for consistent parsing.
- */
-async function getDiskUsage(): Promise<number> {
-  try {
-    const { stdout } = await execFileAsync('df', ['-Pk', '/']);
-    const lines = stdout.trim().split('\n');
-    if (lines.length < 2) return 0;
-
-    // Filesystem 1024-blocks Used Available Capacity Mounted on
-    const parts = lines[1].trim().split(/\s+/);
-    const total = Number.parseInt(parts[1] ?? '', 10);
-    const used = Number.parseInt(parts[2] ?? '', 10);
-
-    if (!Number.isFinite(total) || total <= 0) return 0;
-    if (!Number.isFinite(used) || used < 0) return 0;
-
-    return clampPercent(round2((used / total) * 100));
-  } catch (error) {
-    logError('UTIL:SYSTEM:DISK', error);
-    return 0;
-  }
-}
-
-/**
- * Returns network usage as bytes per second (rx/tx) computed from /proc/net/dev deltas.
- * First call returns 0 because we need a previous sample.
- *
- * Note: This is Linux-specific. On non-Linux systems, it will return { in: 0, out: 0 }.
- */
+// Returns network usage as bytes per second (rx/tx) computed from /proc/net/dev deltas.
 async function getNetworkUsage(): Promise<{ in: number; out: number }> {
   try {
     // /proc/net/dev exists only on Linux
@@ -173,14 +129,11 @@ type SystemStats = {
   networkUsage: { in: number; out: number };
 };
 
-/**
- * Convenience helper used by both REST and WebSocket pollers.
- */
 export async function getSystemStats(): Promise<SystemStats> {
   return {
     cpuUsage: await getCPUUsage(),
     memoryUsage: await getMemoryUsage(),
-    diskUsage: await getDiskUsage(),
+    diskUsage: await getCachedHostDiskUsagePercent('/'),
     networkUsage: await getNetworkUsage(),
   };
 }

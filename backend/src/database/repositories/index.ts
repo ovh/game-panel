@@ -5,3 +5,8 @@ export { ServerActionsRepository } from './serverActionsRepository.js';
 export { SystemMetricsRepository } from './systemMetricsRepository.js';
 export { ServerMetricsRepository } from './serverMetricsRepository.js';
 export { InstallationProgressRepository } from './installationProgressRepository.js';
+export { InstallationInteractionRepository } from './installationInteractionRepository.js';
+export { LinuxGsmCatalogRepository } from './linuxGsmCatalogRepository.js';
+export { FileTransferJobRepository } from './fileTransferJobRepository.js';
+export { ScheduledTaskRepository } from './scheduledTaskRepository.js';
+export { PanelUpdateJobRepository } from './panelUpdateJobRepository.js';

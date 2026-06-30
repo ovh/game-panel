@@ -1,6 +1,7 @@
 export interface ConsoleTerminalTarget {
   serverId: number;
   serverName: string;
+  provider: string;
 }
 
 export interface ActiveLogPromptToast {
@@ -28,19 +29,6 @@ export const MAX_SERVER_LOG_LINES = 5000;
 
 let notificationAudioContext: AudioContext | null = null;
 
-export const normalizeCatalogLogPrompts = (value: unknown) => {
-  if (!Array.isArray(value)) return [];
-
-  return value
-    .map((entry) => {
-      const match = String((entry as { match?: unknown })?.match ?? '').trim();
-      const action = String((entry as { action?: unknown })?.action ?? '').trim();
-      const title = String((entry as { title?: unknown })?.title ?? '').trim();
-      if (!match || !action) return null;
-      return { match, action, title };
-    })
-    .filter((entry): entry is { match: string; action: string; title: string } => entry !== null);
-};
 
 export const normalizeGameIdentifier = (value: string) =>
   String(value ?? '')

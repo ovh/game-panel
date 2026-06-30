@@ -1,44 +1,45 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GameConfigTab } from './GameConfigTab';
-import { ServerSshTerminal } from './ServerSshTerminal';
+
+// Lazily loaded so the xterm terminal emulator is only fetched when the Terminal tab
+// is opened, not on initial app load.
+const ServerSshTerminal = lazy(() =>
+  import('./ServerSshTerminal').then((m) => ({ default: m.ServerSshTerminal }))
+);
+import { ConfirmationModal } from './ConfirmationModal';
 import { ServerSettingsActionModals } from './serverSettings/ServerSettingsActionModals';
-import { ServerSettingsSftpPasswordModals } from './serverSettings/ServerSettingsSftpPasswordModals';
-import { FileManagerTab } from './serverSettings/FileManagerTab';
+import { FileManagerTab, type UploadQueueItem } from './serverSettings/FileManagerTab';
 import { BackupTab } from './serverSettings/BackupTab';
-import { SftpTab } from './serverSettings/SftpTab';
+import { ContainerConfigTab } from './serverSettings/ContainerConfigTab';
+import { ScheduledTasksTab } from './serverSettings/ScheduledTasksTab';
 import { ServerSettingsModalLayout } from './serverSettings/ServerSettingsModalLayout';
 import {
   createServerSettingsAccess,
   SETTINGS_TAB_PRIORITY,
   type SettingsTab,
 } from './serverSettings/access';
+import { type McServerType, getPickerManagedKeys } from '../utils/minecraftCatalog';
 import { resolveFileMutationError } from './serverSettings/fileMutationErrors';
 import { createSettingsTabButtonClass, SERVER_SETTINGS_THEME } from './serverSettings/theme';
 import { useBackupState } from './serverSettings/useBackupState';
-import { useBodyScrollLock } from './serverSettings/useBodyScrollLock';
+import { useBodyScrollLock } from '../src/ui/utils/useBodyScrollLock';
 import { useFileManagerState } from './serverSettings/useFileManagerState';
-import { apiClient, PUBLIC_CONNECTION_HOST } from '../utils/api';
+import { apiClient } from '../utils/api';
 import type { AuthUser } from '../utils/permissions';
 import {
   createBackupNowHandler,
-  createCloseFirstTimePasswordModalHandler,
-  createCloseSftpPasswordModalHandler,
   createCopyContentHandler,
   createCopyPathHandler,
-  createCopySftpDetailHandler,
   createDeleteBackupHandler,
-  createDisableSftpHandler,
   createDownloadBackupHandler,
-  createEnableSftpHandler,
   createExecuteBackupNowHandler,
-  createFirstTimePasswordSubmitHandler,
+  createRenameBackupHandler,
+  createRestoreBackupHandler,
   createSaveBackupSettingsHandler,
-  createUpdateSftpPasswordModalHandler,
 } from './serverSettings/actionHandlers';
-import { createFileManagerHandlers, type FileItem } from './serverSettings/fileManagerHandlers';
+import { createFileManagerHandlers } from './serverSettings/fileManagerHandlers';
 import {
   formatBytes,
-  isSymlinkEntry,
   splitFilePath,
 } from './serverSettings/utils';
 
@@ -47,10 +48,10 @@ interface ServerSettingsModalProps {
   onClose: () => void;
   serverName: string;
   serverGame: string;
+  serverProvider?: string;
+  serverProviderMetadataJson?: string | null;
   serverStatus?: string | null;
   serverId?: number | null;
-  serverSftpUsername?: string | null;
-  serverSftpEnabled?: boolean;
   currentUser?: AuthUser | null;
   serverPermissions?: string[];
 }
@@ -60,37 +61,105 @@ export function ServerSettingsModal({
   onClose,
   serverName,
   serverGame,
+  serverProvider,
+  serverProviderMetadataJson,
   serverStatus,
   serverId,
-  serverSftpUsername,
-  serverSftpEnabled,
   currentUser,
   serverPermissions = [],
 }: ServerSettingsModalProps) {
+  const isLinuxGSMGame = serverProvider === 'linuxgsm';
+  const isExternalProvider = serverProvider === 'external';
+  const isHytaleOvhcloud = serverProvider === 'ovhcloud' && serverGame === 'hytale';
+  const isCS2Ovhcloud = (() => {
+    if (serverProvider !== 'ovhcloud') return false;
+    try {
+      const meta = JSON.parse(serverProviderMetadataJson ?? '{}');
+      return meta?.family === 'counter-strike';
+    } catch { return false; }
+  })();
+
+  const isMinecraftJavaOvhcloud = (() => {
+    if (serverProvider !== 'ovhcloud') return false;
+    try {
+      const meta = JSON.parse(serverProviderMetadataJson ?? '{}');
+      return meta?.family === 'minecraft' && meta?.edition === 'java';
+    } catch {
+      return false;
+    }
+  })();
+
+  const isMinecraftBedrockOvhcloud = (() => {
+    if (serverProvider !== 'ovhcloud') return false;
+    try {
+      const meta = JSON.parse(serverProviderMetadataJson ?? '{}');
+      return meta?.family === 'minecraft' && meta?.edition === 'bedrock';
+    } catch {
+      return false;
+    }
+  })();
+
+  const minecraftServerType = (() => {
+    if (!isMinecraftJavaOvhcloud && !isMinecraftBedrockOvhcloud) return null;
+    try {
+      const meta = JSON.parse(serverProviderMetadataJson ?? '{}');
+      return (meta?.serverType as string | null) ?? null;
+    } catch {
+      return null;
+    }
+  })();
+
+  const validMcServerTypes: McServerType[] = ['vanilla', 'paper', 'fabric', 'neoforge', 'bedrock'];
+  const mcServerTypeChecked: McServerType | null = validMcServerTypes.includes(minecraftServerType as McServerType)
+    ? (minecraftServerType as McServerType)
+    : null;
+  const addonKind: 'plugins' | 'mods' = minecraftServerType === 'paper' ? 'plugins' : 'mods';
+  const addonsSupportedTypes = ['paper', 'fabric', 'neoforge'];
+  const minecraftAddonsSupported = addonsSupportedTypes.includes(minecraftServerType ?? '');
+
+  const ovhcloudConfigFiles = useMemo(() => {
+    if (isMinecraftJavaOvhcloud) return ['/server.properties'];
+    if (isHytaleOvhcloud) return ['/game/Server/config.json'];
+    return undefined;
+  }, [isMinecraftJavaOvhcloud, isHytaleOvhcloud]);
+
+  const serverBackupSupported = (() => {
+    if (serverProvider === 'linuxgsm') return true;
+    if (serverProvider === 'ovhcloud') {
+      try {
+        const meta = JSON.parse(serverProviderMetadataJson ?? '{}');
+        return !!meta?.capabilities?.backup;
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  })();
+
   const [activeTab, setActiveTab] = useState<SettingsTab>('filemanager');
+  // Tracks whether the user has explicitly clicked a tab during the current
+  // open session. Until they do, the active tab follows the computed default,
+  // which can change as server permissions load in asynchronously.
+  const hasUserSelectedTabRef = useRef(false);
+  const [containerConfigSaveCount, setContainerConfigSaveCount] = useState(0);
 
-  const [sftpError, setSftpError] = useState<string | null>(null);
-  const [sftpPasswordLoading, setSftpPasswordLoading] = useState(false);
-  const [sftpToggleLoading, setSftpToggleLoading] = useState(false);
-  const [showFirstTimePasswordModal, setShowFirstTimePasswordModal] = useState(false);
-  const [firstTimePassword, setFirstTimePassword] = useState('');
-  const [firstTimeConfirmPassword, setFirstTimeConfirmPassword] = useState('');
-  const [showFirstTimePassword, setShowFirstTimePassword] = useState(false);
-  const [showFirstTimeConfirmPassword, setShowFirstTimeConfirmPassword] = useState(false);
-  const [firstTimePasswordError, setFirstTimePasswordError] = useState<string | null>(null);
+  const [confirmModal, setConfirmModal] = useState<{
+    title: string;
+    message: string;
+    onConfirm: () => Promise<void>;
+    icon?: 'warning' | 'danger';
+  } | null>(null);
 
-  const [showSftpPasswordModal, setShowSftpPasswordModal] = useState(false);
-  const [sftpModalPassword, setSftpModalPassword] = useState('');
-  const [sftpModalConfirmPassword, setSftpModalConfirmPassword] = useState('');
-  const [showSftpModalPassword, setShowSftpModalPassword] = useState(false);
-  const [showSftpModalConfirmPassword, setShowSftpModalConfirmPassword] = useState(false);
-  const [sftpModalPasswordError, setSftpModalPasswordError] = useState<string | null>(null);
-
-  const [copiedSftp, setCopiedSftp] = useState<string | null>(null);
+  const requestConfirm = (title: string, message: string, onConfirm: () => Promise<void>, icon?: 'warning' | 'danger') => {
+    setConfirmModal({ title, message, onConfirm, icon });
+  };
 
   const {
     currentPath,
     setCurrentPath,
+    currentRoot,
+    setCurrentRoot,
+    availableRoots,
     selectedFile,
     setSelectedFile,
     fileContent,
@@ -107,8 +176,6 @@ export function ServerSettingsModal({
     setCopyPathSuccess,
     copyContentSuccess,
     setCopyContentSuccess,
-    isEditorExpanded,
-    setIsEditorExpanded,
     filesLoading,
     fileLoading,
     setFileLoading,
@@ -135,36 +202,27 @@ export function ServerSettingsModal({
     deleteEntryLoading,
     setDeleteEntryLoading,
     files,
-    setFiles,
     loadFiles,
+    selectedItems,
+    setSelectedItems,
+    deleteMultiNames,
+    setDeleteMultiNames,
   } = useFileManagerState({
     activeTab,
     isOpen,
     serverId,
+    containerConfigSaveCount,
   });
   const {
-    autoBackupEnabled,
-    setAutoBackupEnabled,
-    backupFrequencyType,
-    setBackupFrequencyType,
-    backupHours,
-    setBackupHours,
-    backupTime,
-    setBackupTime,
-    backupDay,
-    setBackupDay,
     backupRetention,
     setBackupRetention,
     backups,
-    backupsPath,
     backupsLoading,
     backupsError,
     setBackupsError,
     backupSettingsLoading,
     backupSettingsError,
     setBackupSettingsError,
-    backupCronError,
-    setBackupCronError,
     stopOnBackup,
     setStopOnBackup,
     backupRetentionDays,
@@ -179,34 +237,105 @@ export function ServerSettingsModal({
     setBackupDownloadLoading,
     backupDeleteLoading,
     setBackupDeleteLoading,
+    backupRestoreLoading,
+    setBackupRestoreLoading,
+    backupRenameLoading,
+    setBackupRenameLoading,
     loadBackups,
     loadBackupSettings,
-    loadBackupCron,
+    backupsNotSupported,
   } = useBackupState({
     serverId,
     isActive: isOpen && activeTab === 'backup',
+    isLinuxGSMGame,
   });
 
   const {
     canUseFileManager,
-    canManageGameUpdates,
-    canUseGameConfigTab,
-    hasAnySettingsAccess,
+    canEditContainerConfig,
+    canManageEnv,
     canWriteFiles,
+    canReadBackups,
     canDownloadBackups,
     canCreateBackups,
     canEditBackupSettings,
     canDeleteBackups,
-    canAccessTab,
+    canRestoreBackups,
+    canRenameBackups,
+    canWriteScheduledTasks,
+    canReadMinecraftSettings,
+    canWriteMinecraftSettings,
+    canReadMinecraftOperators,
+    canWriteMinecraftOperators,
+    canReadMinecraftWhitelist,
+    canWriteMinecraftWhitelist,
+    canReadMinecraftBans,
+    canWriteMinecraftBans,
+    canReadMinecraftIpBans,
+    canWriteMinecraftIpBans,
+    canReadMinecraftAddons,
+    canWriteMinecraftAddons,
+    canUseMinecraft,
+    canReadHytaleSettings,
+    canWriteHytaleSettings,
+    canReadHytaleMods,
+    canWriteHytaleMods,
+    canUseHytale,
+    canWriteCS2Frameworks,
+    canAccessTab: baseCanAccessTab,
   } = createServerSettingsAccess(currentUser, serverPermissions);
+
+  // Whether this server type even has a Game Config surface. Like Terminal, the
+  // tab stays visible (greyed-out) when the user lacks the permissions to see
+  // any content, rather than being shown empty or vanishing entirely.
+  const gameConfigApplicable =
+    !isExternalProvider &&
+    (isMinecraftJavaOvhcloud ||
+      isMinecraftBedrockOvhcloud ||
+      isHytaleOvhcloud ||
+      isCS2Ovhcloud ||
+      isLinuxGSMGame);
+
+  // Whether the Game Config tab actually has content to show for this user.
+  // Each game/provider exposes a different config surface, gated by its own
+  // permission:
+  //  - OVHcloud Minecraft (Java/Bedrock): the Minecraft management sections
+  //  - OVHcloud Hytale: the Hytale settings/mods sections
+  //  - OVHcloud CS2: the CS2 config (behind `server.edit`)
+  //  - LinuxGSM images: on-disk config-file editors (need `fs.read`)
+  // Without the relevant permission the tab would render empty, so we treat it
+  // as inaccessible and grey it out instead.
+  const gameConfigHasContent =
+    ((isMinecraftJavaOvhcloud || isMinecraftBedrockOvhcloud) && canUseMinecraft) ||
+    (isHytaleOvhcloud && canUseHytale) ||
+    (isCS2Ovhcloud && canEditContainerConfig) ||
+    (isLinuxGSMGame && canUseFileManager);
+
+  const canUseGameConfigTab = gameConfigApplicable;
+  const canAccessTab = (tab: SettingsTab): boolean => {
+    if (tab === 'gameconfig') return gameConfigHasContent;
+    // Backups require the server to support them AND `backups.read` to list
+    // them / read their settings. Write actions inside stay gated per-permission.
+    if (tab === 'backup') return serverBackupSupported && canReadBackups;
+    // Container config (ports, mounts, healthcheck, limits…) is readable by
+    // anyone — the backend serves it ungated and redacts `env` for callers
+    // without `server.env`. Editing is gated inside the tab via `canEdit`
+    // (`server.edit`); the env section is hidden without `server.env`.
+    if (tab === 'containerconfig') return true;
+    return baseCanAccessTab(tab);
+  };
 
   const openTab = (tab: SettingsTab) => {
     if (!canAccessTab(tab)) return;
+    hasUserSelectedTabRef.current = true;
     setActiveTab(tab);
   };
   const defaultTab = SETTINGS_TAB_PRIORITY.find((tab) => canAccessTab(tab)) ?? 'filemanager';
-  const sftpUsername = serverSftpUsername ?? '';
-  const sftpEnabled = serverSftpEnabled === true;
+  // Until the user explicitly picks a tab, derive the displayed tab from the
+  // computed default during render instead of relying on the post-paint effect
+  // below — otherwise the modal briefly shows the stale `activeTab` and visibly
+  // jumps to the default on the next frame.
+  const effectiveActiveTab = hasUserSelectedTabRef.current ? activeTab : defaultTab;
   useBodyScrollLock(isOpen);
 
   const getFileMutationErrorMessage = (action: string, error: any): Promise<string> =>
@@ -239,7 +368,7 @@ export function ServerSettingsModal({
       setFileLoading(true);
 
       try {
-        const content = await apiClient.readServerFile(serverId, normalized);
+        const content = await apiClient.readServerFile(serverId, normalized, currentRoot);
         if (cancelled) return;
         setFileContent(content ?? '');
       } catch (error: any) {
@@ -262,6 +391,9 @@ export function ServerSettingsModal({
 
   const {
     handleFileClick,
+    handleFileDoubleClick,
+    handleDeleteSelected,
+    handleMoveEntries,
     handleSaveFile,
     handleOpenFileManagerAtPath,
     handleRenameFile,
@@ -273,9 +405,12 @@ export function ServerSettingsModal({
     handleCreateFile,
     submitCreateEntry,
     handleDownloadFile,
+    handleDownloadPath,
+    handleDownloadSelected,
   } = createFileManagerHandlers({
     renamingFile,
     currentPath,
+    currentRoot,
     serverId,
     selectedFile,
     fileContent,
@@ -307,7 +442,73 @@ export function ServerSettingsModal({
     setCreateEntryError,
     setShowCreateEntryModal,
     setCreateEntryLoading,
+    selectedItems,
+    deleteMultiNames,
+    setSelectedItems,
+    setDeleteMultiNames,
   });
+
+  const [uploadQueue, setUploadQueue] = useState<UploadQueueItem[]>([]);
+
+  const handleUploadFiles = useCallback(
+    async (files: File[]) => {
+      if (!serverId || !canWriteFiles) return;
+
+      // react-dropzone exposes each file's path relative to a dropped folder on `file.path`
+      // (e.g. "/mymod/sub/file.txt"). Preserve that structure instead of flattening to file.name.
+      const relativePathOf = (file: File): string => {
+        const raw = String((file as any).path || (file as any).webkitRelativePath || file.name || '')
+          .replace(/\\/g, '/');
+        let rel = raw.startsWith('./') ? raw.slice(2) : raw.startsWith('/') ? raw.slice(1) : raw;
+        rel = rel.replace(/\/{2,}/g, '/');
+        if (!rel || rel.split('/').some((seg) => seg === '..')) return file.name;
+        return rel;
+      };
+
+      const dirPath = currentPath.replace(/\/$/, '');
+      const uploads = files.map((file) => ({ file, relativePath: relativePathOf(file) }));
+
+      const newItems: UploadQueueItem[] = uploads.map(({ relativePath }) => ({
+        id: `${relativePath}-${Date.now()}-${Math.random()}`,
+        name: relativePath,
+        progress: 0,
+        done: false,
+      }));
+      setUploadQueue((prev) => [...prev, ...newItems]);
+
+      await Promise.all(
+        uploads.map(async ({ file, relativePath }, i) => {
+          const queueId = newItems[i].id;
+          try {
+            await apiClient.uploadServerFile(serverId, dirPath, relativePath, file, (pct) => {
+              setUploadQueue((prev) =>
+                prev.map((item) => (item.id === queueId ? { ...item, progress: pct } : item))
+              );
+            }, currentRoot);
+            setUploadQueue((prev) =>
+              prev.map((item) =>
+                item.id === queueId ? { ...item, progress: 100, done: true } : item
+              )
+            );
+          } catch (error: any) {
+            const msg = error?.response?.data?.error || error?.message || 'Upload failed';
+            setUploadQueue((prev) =>
+              prev.map((item) =>
+                item.id === queueId ? { ...item, error: msg, done: true } : item
+              )
+            );
+          }
+        })
+      );
+
+      loadFiles(currentPath);
+
+      setTimeout(() => {
+        setUploadQueue((prev) => prev.filter((item) => !item.done || !!item.error));
+      }, 3000);
+    },
+[serverId, canWriteFiles, currentPath, currentRoot, loadFiles]
+  );
 
   const handleCopyPath = createCopyPathHandler({
     currentPath,
@@ -317,10 +518,6 @@ export function ServerSettingsModal({
   const handleCopyContent = createCopyContentHandler({
     fileContent,
     setCopyContentSuccess,
-  });
-
-  const handleCopySftpDetail = createCopySftpDetailHandler({
-    setCopiedSftp,
   });
 
   const handleDownloadBackup = createDownloadBackupHandler({
@@ -333,26 +530,29 @@ export function ServerSettingsModal({
   const handleDeleteBackup = createDeleteBackupHandler({
     canDeleteBackups,
     serverId,
-    backupsPath,
     setBackupDeleteLoading,
     setBackupsError,
     loadBackups,
+    requestConfirm,
   });
 
   const executeBackupNow = createExecuteBackupNowHandler({
     canCreateBackups,
     serverId,
-    backupsPath,
     setBackupNowLoading,
     setBackupsError,
     loadBackups,
   });
+
+  const isMinecraftOvhcloud = isMinecraftJavaOvhcloud || isMinecraftBedrockOvhcloud;
 
   const handleBackupNow = createBackupNowHandler({
     canCreateBackups,
     serverId,
     setShowBackupNowWarningModal,
     executeBackupNow,
+    hotBackupOnly: isHytaleOvhcloud,
+    skipWarning: isMinecraftOvhcloud,
   });
 
   const handleSaveBackupSettings = createSaveBackupSettingsHandler({
@@ -361,85 +561,47 @@ export function ServerSettingsModal({
     backupRetention,
     backupRetentionDays,
     stopOnBackup,
-    autoBackupEnabled,
-    backupFrequencyType,
-    backupHours,
-    backupTime,
-    backupDay,
     setBackupSaving,
     setBackupSettingsError,
-    setBackupCronError,
     loadBackupSettings,
-    loadBackupCron,
   });
 
-  const handleEnableSftp = createEnableSftpHandler({
+  const handleRestoreBackup = createRestoreBackupHandler({
+    canRestoreBackups,
     serverId,
-    setShowFirstTimePasswordModal,
-    setSftpToggleLoading,
-    setSftpError,
+    setBackupRestoreLoading,
+    setBackupsError,
+    requestConfirm: (title, message, onConfirm) => requestConfirm(title, message, onConfirm, 'danger'),
   });
 
-  const handleFirstTimePasswordSubmit = createFirstTimePasswordSubmitHandler({
+  const handleRenameBackup = createRenameBackupHandler({
+    canRenameBackups,
     serverId,
-    firstTimePassword,
-    firstTimeConfirmPassword,
-    setSftpPasswordLoading,
-    setFirstTimePasswordError,
-    setShowFirstTimePasswordModal,
-    setFirstTimePassword,
-    setFirstTimeConfirmPassword,
-    setShowFirstTimePassword,
-    setShowFirstTimeConfirmPassword,
-  });
-
-  const closeFirstTimePasswordModal = createCloseFirstTimePasswordModalHandler({
-    setShowFirstTimePasswordModal,
-    setFirstTimePassword,
-    setFirstTimeConfirmPassword,
-    setFirstTimePasswordError,
-    setShowFirstTimePassword,
-    setShowFirstTimeConfirmPassword,
-  });
-
-  const handleDisableSftp = createDisableSftpHandler({
-    serverId,
-    setSftpToggleLoading,
-    setSftpError,
-  });
-
-  const handleUpdateSftpPasswordModal = createUpdateSftpPasswordModalHandler({
-    serverId,
-    sftpModalPassword,
-    sftpModalConfirmPassword,
-    setSftpPasswordLoading,
-    setSftpModalPasswordError,
-    setShowSftpPasswordModal,
-    setSftpModalPassword,
-    setSftpModalConfirmPassword,
-    setShowSftpModalPassword,
-    setShowSftpModalConfirmPassword,
-  });
-
-  const closeSftpPasswordModal = createCloseSftpPasswordModalHandler({
-    setShowSftpPasswordModal,
-    setSftpModalPassword,
-    setSftpModalConfirmPassword,
-    setSftpModalPasswordError,
-    setShowSftpModalPassword,
-    setShowSftpModalConfirmPassword,
+    setBackupRenameLoading,
+    setBackupsError,
+    loadBackups,
   });
 
   useEffect(() => {
     if (isOpen) return;
+    hasUserSelectedTabRef.current = false;
     if (activeTab === defaultTab) return;
     setActiveTab(defaultTab);
   }, [isOpen, activeTab, defaultTab]);
 
   useEffect(() => {
     if (!isOpen) return;
-    if (canAccessTab(activeTab)) return;
-    setActiveTab(defaultTab);
+    // Until the user explicitly picks a tab, keep following the computed
+    // default. Server permissions load asynchronously after the modal opens,
+    // so the default can shift from the last-resort fallback (Scheduled Tasks,
+    // which is always accessible) to a higher-priority tab (e.g. Game Config)
+    // once permissions arrive.
+    if (!hasUserSelectedTabRef.current) {
+      if (activeTab !== defaultTab) setActiveTab(defaultTab);
+      return;
+    }
+    // Safety net: if the user's current tab becomes inaccessible, fall back.
+    if (!canAccessTab(activeTab)) setActiveTab(defaultTab);
   }, [isOpen, activeTab, defaultTab]);
 
   const {
@@ -455,7 +617,7 @@ export function ServerSettingsModal({
     inputBorder,
   } = SERVER_SETTINGS_THEME;
   const tabButtonClass = createSettingsTabButtonClass(
-    activeTab,
+    effectiveActiveTab,
     canAccessTab,
     activeBg,
     textPrimary,
@@ -468,6 +630,7 @@ export function ServerSettingsModal({
         isOpen={isOpen}
         onClose={onClose}
         serverName={serverName}
+        serverProvider={serverProvider}
         modalBg={modalBg}
         sidebarBg={sidebarBg}
         borderColor={borderColor}
@@ -475,11 +638,12 @@ export function ServerSettingsModal({
         textSecondary={textSecondary}
         hoverBg={hoverBg}
         canUseGameConfigTab={canUseGameConfigTab}
+        canShowBackupTab={serverBackupSupported}
+        canShowScheduledTasksTab={true}
         canAccessTab={canAccessTab}
         openTab={openTab}
         tabButtonClass={tabButtonClass}
-        hasAnySettingsAccess={hasAnySettingsAccess}
-        activeTab={activeTab}
+        activeTab={effectiveActiveTab}
         fileManagerContent={
           <FileManagerTab
             borderColor={borderColor}
@@ -491,6 +655,9 @@ export function ServerSettingsModal({
             textSecondary={textSecondary}
             currentPath={currentPath}
             setCurrentPath={setCurrentPath}
+            currentRoot={currentRoot}
+            availableRoots={availableRoots}
+            setCurrentRoot={setCurrentRoot}
             loadFiles={loadFiles}
             handleCreateFolder={handleCreateFolder}
             handleCreateFile={handleCreateFile}
@@ -501,28 +668,34 @@ export function ServerSettingsModal({
             filesError={filesError}
             files={files}
             selectedFile={selectedFile}
+            setSelectedFile={setSelectedFile}
+            selectedItems={selectedItems}
             renamingFile={renamingFile}
             renameValue={renameValue}
             setRenameValue={setRenameValue}
             handleFileClick={handleFileClick}
+            handleFileDoubleClick={handleFileDoubleClick}
+            handleDeleteSelected={handleDeleteSelected}
+            handleMoveEntries={handleMoveEntries}
             handleRenameConfirm={handleRenameConfirm}
             handleRenameCancel={handleRenameCancel}
             handleRenameFile={handleRenameFile}
             handleDeleteFile={handleDeleteFile}
-            isEditorExpanded={isEditorExpanded}
-            setIsEditorExpanded={setIsEditorExpanded}
-            handleCopyContent={handleCopyContent}
-            copyContentSuccess={copyContentSuccess}
-            handleDownloadFile={handleDownloadFile}
-            handleSaveFile={handleSaveFile}
-            isFileDirty={isFileDirty}
-            savingFile={savingFile}
-            setSelectedFile={setSelectedFile}
+            handleDownloadPath={handleDownloadPath}
+            handleDownloadSelected={handleDownloadSelected}
             fileLoading={fileLoading}
             fileContent={fileContent}
             setFileContent={setFileContent}
+            isFileDirty={isFileDirty}
             setIsFileDirty={setIsFileDirty}
             fileError={fileError}
+            savingFile={savingFile}
+            handleSaveFile={handleSaveFile}
+            handleDownloadFile={handleDownloadFile}
+            handleCopyContent={handleCopyContent}
+            copyContentSuccess={copyContentSuccess}
+            onUploadFiles={handleUploadFiles}
+            uploadQueue={uploadQueue}
           />
         }
         backupContent={
@@ -545,23 +718,11 @@ export function ServerSettingsModal({
             setBackupRetentionDays={setBackupRetentionDays}
             stopOnBackup={stopOnBackup}
             setStopOnBackup={setStopOnBackup}
-            backupCronError={backupCronError}
-            autoBackupEnabled={autoBackupEnabled}
-            setAutoBackupEnabled={setAutoBackupEnabled}
-            backupFrequencyType={backupFrequencyType}
-            setBackupFrequencyType={setBackupFrequencyType}
-            backupHours={backupHours}
-            setBackupHours={setBackupHours}
-            backupTime={backupTime}
-            setBackupTime={setBackupTime}
-            backupDay={backupDay}
-            setBackupDay={setBackupDay}
             handleSaveBackupSettings={handleSaveBackupSettings}
             canEditBackupSettings={canEditBackupSettings}
             backupSaving={backupSaving}
             backupSettingsLoading={backupSettingsLoading}
             loadBackups={loadBackups}
-            backupsPath={backupsPath}
             backupsError={backupsError}
             backupsLoading={backupsLoading}
             backups={backups}
@@ -572,43 +733,131 @@ export function ServerSettingsModal({
             handleDeleteBackup={handleDeleteBackup}
             canDeleteBackups={canDeleteBackups}
             backupDeleteLoading={backupDeleteLoading}
-          />
-        }
-        sftpContent={
-          <SftpTab
-            contentBg={contentBg}
-            borderColor={borderColor}
-            textPrimary={textPrimary}
-            textSecondary={textSecondary}
-            serverName={serverName}
-            sftpError={sftpError}
-            sftpEnabled={sftpEnabled}
-            sftpToggleLoading={sftpToggleLoading}
-            handleEnableSftp={handleEnableSftp}
-            handleDisableSftp={handleDisableSftp}
-            publicConnectionHost={PUBLIC_CONNECTION_HOST}
-            copiedSftp={copiedSftp}
-            handleCopySftpDetail={handleCopySftpDetail}
-            sftpUsername={sftpUsername}
-            setShowSftpPasswordModal={setShowSftpPasswordModal}
+            handleRestoreBackup={handleRestoreBackup}
+            canRestoreBackups={canRestoreBackups}
+            backupRestoreLoading={backupRestoreLoading}
+            handleRenameBackup={handleRenameBackup}
+            canRenameBackups={canRenameBackups}
+            backupRenameLoading={backupRenameLoading}
+            isLinuxGSMGame={isLinuxGSMGame}
+            backupsNotSupported={backupsNotSupported}
           />
         }
         gameConfigContent={
           <GameConfigTab
             serverGame={serverGame}
+            serverProvider={serverProvider}
             serverId={serverId}
             canReadFileManager={canUseFileManager}
             canWriteFileManager={canWriteFiles}
-            canManageGameUpdates={canManageGameUpdates}
-            onOpenFileManagerPath={handleOpenFileManagerAtPath}
+            onOpenFileManagerPath={(path) => { hasUserSelectedTabRef.current = true; handleOpenFileManagerAtPath(path); }}
+            ovhcloudConfigFiles={ovhcloudConfigFiles}
+            minecraftProps={(isMinecraftJavaOvhcloud || isMinecraftBedrockOvhcloud) && serverId && canUseMinecraft ? {
+              serverId,
+              serverStatus,
+              canReadSettings: canReadMinecraftSettings,
+              canWriteSettings: canWriteMinecraftSettings,
+              canReadOperators: isMinecraftJavaOvhcloud && canReadMinecraftOperators,
+              canWriteOperators: isMinecraftJavaOvhcloud && canWriteMinecraftOperators,
+              canReadWhitelist: isMinecraftJavaOvhcloud && canReadMinecraftWhitelist,
+              canWriteWhitelist: isMinecraftJavaOvhcloud && canWriteMinecraftWhitelist,
+              canReadBans: isMinecraftJavaOvhcloud && canReadMinecraftBans,
+              canWriteBans: isMinecraftJavaOvhcloud && canWriteMinecraftBans,
+              canReadIpBans: isMinecraftJavaOvhcloud && canReadMinecraftIpBans,
+              canWriteIpBans: isMinecraftJavaOvhcloud && canWriteMinecraftIpBans,
+              canReadAddons: isMinecraftJavaOvhcloud && minecraftAddonsSupported && canReadMinecraftAddons,
+              canWriteAddons: isMinecraftJavaOvhcloud && minecraftAddonsSupported && canWriteMinecraftAddons,
+              addonKind,
+              borderColor,
+              contentBg,
+              textPrimary,
+              textSecondary,
+              mcServerType: mcServerTypeChecked,
+              canEditVersion: canEditContainerConfig,
+              canManageEnv,
+              containerConfigSaveCount,
+            } : null}
+            hytaleProps={isHytaleOvhcloud && serverId && canUseHytale ? {
+              serverId,
+              serverStatus,
+              canReadSettings: canReadHytaleSettings,
+              canWriteSettings: canWriteHytaleSettings,
+              canReadMods: canReadHytaleMods,
+              canWriteMods: canWriteHytaleMods,
+              borderColor,
+              contentBg,
+              textPrimary,
+              textSecondary,
+            } : null}
+            cs2Props={isCS2Ovhcloud && serverId && canEditContainerConfig ? {
+              serverId,
+              serverStatus,
+              canEdit: canEditContainerConfig,
+              canWriteFrameworks: canWriteCS2Frameworks,
+              canManageEnv,
+              borderColor,
+              contentBg,
+              textPrimary,
+              textSecondary,
+              inputBg,
+              inputBorder,
+            } : null}
           />
         }
         terminalContent={
           <div className="h-full overflow-hidden p-3 sm:p-4 md:p-6">
-            <ServerSshTerminal serverId={serverId} serverName={serverName} />
+            <Suspense fallback={<div className="p-4 text-sm text-gray-400">Loading terminal…</div>}>
+              <ServerSshTerminal serverId={serverId} serverName={serverName} serverStatus={serverStatus} />
+            </Suspense>
           </div>
         }
+        scheduledTasksContent={
+          <ScheduledTasksTab
+            serverId={serverId}
+            serverBackupSupported={serverBackupSupported}
+            serverProvider={serverProvider}
+            serverGame={serverGame}
+            canRead={canAccessTab('scheduledtasks')}
+            canWrite={canWriteScheduledTasks}
+            contentBg={contentBg}
+            borderColor={borderColor}
+            textPrimary={textPrimary}
+            textSecondary={textSecondary}
+            hoverBg={hoverBg}
+            inputBg={inputBg}
+            inputBorder={inputBorder}
+          />
+        }
+        containerConfigContent={
+          <ContainerConfigTab
+            serverId={serverId}
+            serverStatus={serverStatus}
+            borderColor={borderColor}
+            contentBg={contentBg}
+            inputBg={inputBg}
+            inputBorder={inputBorder}
+            textPrimary={textPrimary}
+            textSecondary={textSecondary}
+            hoverBg={hoverBg}
+            canEdit={canEditContainerConfig}
+            canManageEnv={canManageEnv}
+            pickerManagedKeys={mcServerTypeChecked ? getPickerManagedKeys(mcServerTypeChecked) : []}
+            onSaved={() => setContainerConfigSaveCount(c => c + 1)}
+          />
+        }
       />
+
+      {confirmModal && (
+        <ConfirmationModal
+          isOpen={true}
+          title={confirmModal.title}
+          message={confirmModal.message}
+          icon={confirmModal.icon ?? 'warning'}
+          onConfirm={confirmModal.onConfirm}
+          onClose={() => setConfirmModal(null)}
+          confirmText="Confirm"
+        />
+      )}
 
       <ServerSettingsActionModals
         modalBg={modalBg}
@@ -629,15 +878,18 @@ export function ServerSettingsModal({
         submitCreateEntry={submitCreateEntry}
         showDeleteEntryModal={showDeleteEntryModal}
         deleteEntryTarget={deleteEntryTarget}
+        deleteMultiNames={deleteMultiNames}
         deleteEntryLoading={deleteEntryLoading}
         closeDeleteEntryModal={() => {
           setShowDeleteEntryModal(false);
           setDeleteEntryTarget(null);
+          setDeleteMultiNames(null);
         }}
         confirmDeleteEntry={confirmDeleteEntry}
         showBackupNowWarningModal={showBackupNowWarningModal}
         backupNowLoading={backupNowLoading}
         stopOnBackup={stopOnBackup}
+        hotBackupOnly={isHytaleOvhcloud}
         closeBackupWarningModal={() => {
           if (backupNowLoading) return;
           setShowBackupNowWarningModal(false);
@@ -645,42 +897,6 @@ export function ServerSettingsModal({
         executeBackupNow={executeBackupNow}
       />
 
-      <ServerSettingsSftpPasswordModals
-        modalBg={modalBg}
-        borderColor={borderColor}
-        textPrimary={textPrimary}
-        textSecondary={textSecondary}
-        hoverBg={hoverBg}
-        inputBg={inputBg}
-        inputBorder={inputBorder}
-        showFirstTimePasswordModal={showFirstTimePasswordModal}
-        closeFirstTimePasswordModal={closeFirstTimePasswordModal}
-        firstTimePassword={firstTimePassword}
-        setFirstTimePassword={setFirstTimePassword}
-        firstTimeConfirmPassword={firstTimeConfirmPassword}
-        setFirstTimeConfirmPassword={setFirstTimeConfirmPassword}
-        showFirstTimePassword={showFirstTimePassword}
-        setShowFirstTimePassword={setShowFirstTimePassword}
-        showFirstTimeConfirmPassword={showFirstTimeConfirmPassword}
-        setShowFirstTimeConfirmPassword={setShowFirstTimeConfirmPassword}
-        firstTimePasswordError={firstTimePasswordError}
-        clearFirstTimePasswordError={() => setFirstTimePasswordError(null)}
-        handleFirstTimePasswordSubmit={handleFirstTimePasswordSubmit}
-        sftpPasswordLoading={sftpPasswordLoading}
-        showSftpPasswordModal={showSftpPasswordModal}
-        closeSftpPasswordModal={closeSftpPasswordModal}
-        sftpModalPassword={sftpModalPassword}
-        setSftpModalPassword={setSftpModalPassword}
-        sftpModalConfirmPassword={sftpModalConfirmPassword}
-        setSftpModalConfirmPassword={setSftpModalConfirmPassword}
-        showSftpModalPassword={showSftpModalPassword}
-        setShowSftpModalPassword={setShowSftpModalPassword}
-        showSftpModalConfirmPassword={showSftpModalConfirmPassword}
-        setShowSftpModalConfirmPassword={setShowSftpModalConfirmPassword}
-        sftpModalPasswordError={sftpModalPasswordError}
-        clearSftpModalPasswordError={() => setSftpModalPasswordError(null)}
-        handleUpdateSftpPasswordModal={handleUpdateSftpPasswordModal}
-      />
     </>
   );
 }

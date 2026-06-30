@@ -19,6 +19,21 @@ require_local_source_tree() {
     die "This script must be run from the root of a cloned game-panel repository. Missing expected directories under: $root"
 }
 
+read_package_json_version() {
+  awk -F'"' '/"version"[[:space:]]*:/ { print $4; exit }' "$1"
+}
+
+assert_app_versions_match() {
+  local source_root="$1"
+  local backend_version frontend_version
+  backend_version="$(read_package_json_version "$source_root/backend/package.json")"
+  frontend_version="$(read_package_json_version "$source_root/frontend/package.json")"
+  [[ -n "$backend_version" ]] || die "Unable to read backend version from $source_root/backend/package.json"
+  [[ -n "$frontend_version" ]] || die "Unable to read frontend version from $source_root/frontend/package.json"
+  [[ "$backend_version" == "$frontend_version" ]] || \
+    die "Version mismatch: backend=$backend_version, frontend=$frontend_version (they must be identical)."
+}
+
 require_cmd() {
   local cmd="$1"
   command -v "$cmd" >/dev/null 2>&1 || die "Missing required command: $cmd"
@@ -80,10 +95,10 @@ require_supported_platform() {
   detect_os_release
 
   case "${DISTRO_ID}:${DISTRO_VERSION_ID}" in
-    debian:12|debian:13|ubuntu:24.04)
+    debian:12|debian:13|ubuntu:22.04|ubuntu:24.04|ubuntu:25.10|ubuntu:26.04)
       ;;
     *)
-      die "Unsupported distribution: ${DISTRO_PRETTY_NAME}. Supported: Debian 12, Debian 13, Ubuntu 24.04."
+      die "Unsupported distribution: ${DISTRO_PRETTY_NAME}. Supported: Debian 12, Debian 13, Ubuntu 22.04, Ubuntu 24.04, Ubuntu 25.10, Ubuntu 26.04."
       ;;
   esac
 
@@ -105,7 +120,6 @@ install_base_packages() {
     curl \
     git \
     gnupg \
-    openssh-server \
     openssl \
     tar
 }
@@ -132,6 +146,21 @@ remove_legacy_docker_packages() {
     fi
   done
 }
+DOCKER_GPG_FINGERPRINT="9DC858229FC7DD38854AE2D88D81803C0EBFCD88"
+
+verify_docker_gpg_key() {
+  local keyring_file="$1"
+  require_cmd gpg
+
+  local actual_fpr=""
+  actual_fpr="$(gpg --show-keys --with-colons "$keyring_file" 2>/dev/null \
+    | awk -F: '$1 == "fpr" { print $10; exit }')"
+
+  if [[ "$actual_fpr" != "$DOCKER_GPG_FINGERPRINT" ]]; then
+    rm -f "$keyring_file"
+    die "Docker GPG key fingerprint mismatch (expected ${DOCKER_GPG_FINGERPRINT}, got ${actual_fpr:-none}). Aborting to avoid trusting an untrusted key."
+  fi
+}
 
 configure_docker_apt_repo() {
   local repo_file="/etc/apt/sources.list.d/docker.list"
@@ -140,12 +169,13 @@ configure_docker_apt_repo() {
   local repo_line
 
   require_supported_platform
-  apt_install ca-certificates curl
+  apt_install ca-certificates curl gnupg
   require_cmd curl
   require_cmd dpkg
 
   install -m 0755 -d /etc/apt/keyrings
   curl -fsSL "https://download.docker.com/linux/${DISTRO_ID}/gpg" -o "$keyring_file"
+  verify_docker_gpg_key "$keyring_file"
   chmod a+r "$keyring_file"
 
   arch="$(dpkg --print-architecture)"

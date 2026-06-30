@@ -1,0 +1,8 @@
+{
+  "Group": "ovh.gamepanel",
+  "Name": "GamePanelCredentialStore",
+  "Version": "${version}",
+  "Description": "Game Panel OAuth credential store integration for Hytale dedicated servers.",
+  "Main": "ovh.gamepanel.hytale.authstore.GamePanelCredentialStorePlugin",
+  "IncludesAssetPack": false
+}

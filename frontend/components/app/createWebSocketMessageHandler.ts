@@ -5,7 +5,7 @@ import {
   type ServerHistoryEntry,
   type ServerMetricHistoryPoint,
 } from '../../utils/serverRuntime';
-import type { GameServer } from '../../types/gameServer';
+import type { GameServer, InstallInteraction, InstallStep } from '../../types/gameServer';
 
 interface CreateWebSocketMessageHandlerDeps {
   setGameServers: React.Dispatch<React.SetStateAction<GameServer[]>>;
@@ -16,8 +16,6 @@ interface CreateWebSocketMessageHandlerDeps {
   suppressReplayAfterClearRef: React.MutableRefObject<Record<string, boolean>>;
   replaceServerLogs: (serverId: string, nextLogs: LogEntry[]) => void;
   handleAddLog: (serverId: string, log: LogEntry) => void;
-  consoleReadyRef: React.MutableRefObject<Record<string, boolean | null>>;
-  setConsoleReadyByServer: React.Dispatch<React.SetStateAction<Record<string, boolean | null>>>;
   normalizeRealtimeServer: (server: any, existing?: GameServer) => GameServer;
   removeServerFromUi: (serverId: string) => void;
   setInstallServerId: React.Dispatch<React.SetStateAction<number | null>>;
@@ -25,6 +23,8 @@ interface CreateWebSocketMessageHandlerDeps {
   setInstallStatus: React.Dispatch<React.SetStateAction<string | null>>;
   setInstallError: React.Dispatch<React.SetStateAction<string | null>>;
   setInstalling: React.Dispatch<React.SetStateAction<boolean>>;
+  setInstallInteraction: React.Dispatch<React.SetStateAction<InstallInteraction | null>>;
+  setInstallPlan: React.Dispatch<React.SetStateAction<InstallStep[]>>;
   lastInstallProgressLogRef: React.MutableRefObject<Record<number, number>>;
   refreshInstallPermissions: () => Promise<void> | void;
   addCLIMessage: (
@@ -43,8 +43,6 @@ export function createWebSocketMessageHandler({
   suppressReplayAfterClearRef,
   replaceServerLogs,
   handleAddLog,
-  consoleReadyRef,
-  setConsoleReadyByServer,
   normalizeRealtimeServer,
   removeServerFromUi,
   setInstallServerId,
@@ -52,6 +50,8 @@ export function createWebSocketMessageHandler({
   setInstallStatus,
   setInstallError,
   setInstalling,
+  setInstallInteraction,
+  setInstallPlan,
   lastInstallProgressLogRef,
   refreshInstallPermissions,
   addCLIMessage,
@@ -97,7 +97,14 @@ export function createWebSocketMessageHandler({
           raw?.usage?.memory
       );
 
-      return { cpu, memory };
+      const disk = parseMetricPercent(
+        raw?.diskUsage ?? raw?.disk_usage ?? raw?.disk
+      );
+
+      const networkIn = Math.max(0, Number(raw?.network?.in ?? raw?.network_in ?? 0) || 0);
+      const networkOut = Math.max(0, Number(raw?.network?.out ?? raw?.network_out ?? 0) || 0);
+
+      return { cpu, memory, disk, networkIn, networkOut };
     };
 
     const normalizeServerId = (msg: any): string | null => {
@@ -152,6 +159,9 @@ export function createWebSocketMessageHandler({
         timestamp,
         cpuUsage: clampPercent(normalized.cpu ?? 0),
         memoryUsage: clampPercent(normalized.memory ?? 0),
+        diskUsage: clampPercent(normalized.disk ?? 0),
+        networkIn: Math.max(0, normalized.networkIn ?? 0),
+        networkOut: Math.max(0, normalized.networkOut ?? 0),
       };
     };
 
@@ -161,7 +171,10 @@ export function createWebSocketMessageHandler({
     ) =>
       left?.timestamp === right?.timestamp &&
       left?.cpuUsage === right?.cpuUsage &&
-      left?.memoryUsage === right?.memoryUsage;
+      left?.memoryUsage === right?.memoryUsage &&
+      left?.diskUsage === right?.diskUsage &&
+      left?.networkIn === right?.networkIn &&
+      left?.networkOut === right?.networkOut;
 
     const normalizeSystemMetric = (raw: any) => {
       if (!raw || typeof raw !== 'object') return raw;
@@ -196,8 +209,8 @@ export function createWebSocketMessageHandler({
           ? rawLevel
           : 'info';
       const actor =
-        typeof action?.actor_username === 'string' && action.actor_username.trim()
-          ? `[${action.actor_username}] `
+        typeof action?.actorUsername === 'string' && action.actorUsername.trim()
+          ? `[${action.actorUsername}] `
           : '';
       const parsedId = Number(action?.id);
       const entry: ServerHistoryEntry = {
@@ -292,10 +305,16 @@ export function createWebSocketMessageHandler({
 
                 const nextCpuUsage = normalized.cpu ?? server.cpuUsage;
                 const nextMemoryUsage = normalized.memory ?? server.memoryUsage;
+                const nextDiskUsage = normalized.disk !== undefined ? normalized.disk : server.diskUsage;
+                const nextNetworkIn = normalized.networkIn;
+                const nextNetworkOut = normalized.networkOut;
 
                 if (
                   nextCpuUsage === server.cpuUsage &&
-                  nextMemoryUsage === server.memoryUsage
+                  nextMemoryUsage === server.memoryUsage &&
+                  nextDiskUsage === server.diskUsage &&
+                  nextNetworkIn === server.networkIn &&
+                  nextNetworkOut === server.networkOut
                 ) {
                   return server;
                 }
@@ -305,6 +324,9 @@ export function createWebSocketMessageHandler({
                   ...server,
                   cpuUsage: nextCpuUsage,
                   memoryUsage: nextMemoryUsage,
+                  diskUsage: nextDiskUsage,
+                  networkIn: nextNetworkIn,
+                  networkOut: nextNetworkOut,
                 };
               });
 
@@ -497,21 +519,6 @@ export function createWebSocketMessageHandler({
         break;
       }
 
-      case 'console:status': {
-        if (serverId === undefined || serverId === null) break;
-
-        const id = String(serverId);
-        const ready = Boolean(message.ready);
-
-        consoleReadyRef.current[id] = ready;
-        setConsoleReadyByServer((prev) => ({
-          ...prev,
-          [id]: ready,
-        }));
-
-        break;
-      }
-
       case 'servers:subscribed':
         break;
 
@@ -556,6 +563,21 @@ export function createWebSocketMessageHandler({
       case 'install:subscribed':
         break;
 
+      case 'install:plan': {
+        setInstallPlan(Array.isArray(message.steps) ? message.steps : []);
+        break;
+      }
+
+      case 'install:interaction': {
+        const interaction = message as InstallInteraction;
+        if (interaction.status === 'pending') {
+          setInstallInteraction(interaction);
+        } else {
+          setInstallInteraction((prev) => (prev?.id === interaction.id ? null : prev));
+        }
+        break;
+      }
+
       case 'install:progress': {
         const { progress, status, errorMessage } = message;
         setGameServers((prev) =>
@@ -578,16 +600,22 @@ export function createWebSocketMessageHandler({
           delete lastInstallProgressLogRef.current[serverId];
           setInstallError(errorMessage || 'Installation failed');
           setInstalling(false);
+          setInstallInteraction(null);
+          setInstallPlan([]);
           addCLIMessage(
             'error',
-            `[ERROR] Installation failed for server ${serverId}: ${errorMessage || 'Unknown error'}`
+            `[ERROR] Installation failed: ${errorMessage || 'Unknown error'}`,
+            resolveServerName(serverId),
+            'install'
           );
         } else if (status === 'completed') {
           delete lastInstallProgressLogRef.current[serverId];
           setInstallError(null);
           setInstalling(false);
+          setInstallInteraction(null);
+          setInstallPlan([]);
           void refreshInstallPermissions();
-          addCLIMessage('success', `[OK] Installation completed for server ${serverId}`);
+          addCLIMessage('success', `[OK] Installation completed`, resolveServerName(serverId), 'install');
         } else {
           setInstalling(true);
           const pct = Math.round(progress || 0);
@@ -597,7 +625,7 @@ export function createWebSocketMessageHandler({
           if (prevPct === undefined || pct === 0 || pct === 100 || Math.abs(pct - prevPct) >= 10) {
             addCLIMessage(
               'info',
-              `[INSTALL] Progress for server ${serverId}: ${pct}%`,
+              `[INSTALL] Progress: ${pct}%`,
               resolveServerName(serverId),
               'install'
             );

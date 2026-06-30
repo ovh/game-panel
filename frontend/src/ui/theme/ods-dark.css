@@ -3,6 +3,7 @@
     --gp-primary-100: var(--color-cyan-400);
     --gp-primary-200: var(--color-cyan-400);
     --gp-primary-300: var(--color-cyan-400);
+    --gp-tab-active-text: #031126;
     --gp-primary-400: #157eea;
     --gp-primary-500: #0050d7;
     --gp-primary-600: #002dbe;
@@ -51,6 +52,14 @@
 }
 
 @layer components {
+
+  /* ── Surface utility classes ── */
+  .bg-gp-surface-base     { background-color: #080e1c; }
+  .bg-gp-surface-card     { background-color: #0f1a2e; }
+  .bg-gp-surface-elevated { background-color: #162035; }
+  .bg-gp-surface-input    { background-color: #0c1525; }
+  .bg-gp-surface-overlay  { background-color: #050c1a; }
+
   .gp-app-card[data-ods='card'] {
     background: #111827;
     border: 1px solid #1f2a44;
@@ -62,7 +71,7 @@
     color: #e6edf7;
     background: transparent;
     --ods-table-border-color: #1f2a44;
-    --ods-table-head-background-color: #111827;
+    --ods-table-head-background-color: transparent;
     --ods-table-striped-background-color: #101a2c;
   }
 
@@ -71,11 +80,11 @@
     font-size: 0.75rem;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    background: #111827;
+    background: transparent;
   }
 
   .gp-app-table[data-ods='table'] thead tr th {
-    background: #111827;
+    background: transparent;
     color: #93a5be;
     border-color: #1f2a44;
   }
@@ -128,14 +137,37 @@
   }
 
   .gp-app-button--neutral[data-ods='button'] {
-    background: #111827;
+    background: #1e293b;
     border-color: #334155;
     color: #e2e8f0;
+    padding-inline: 1.25rem;
+    padding-block: 0.625rem;
   }
 
   .gp-app-button--neutral[data-ods='button']:hover {
+    background: #263448;
     border-color: var(--gp-ods-accent-primary);
     color: #ffffff;
+  }
+
+  .gp-app-button--critical[data-ods='button'] {
+    background: #dc2626;
+    border-color: #dc2626;
+    color: #ffffff;
+  }
+
+  .gp-app-button--critical[data-ods='button']:hover {
+    background: #b91c1c;
+    border-color: #b91c1c;
+    color: #ffffff;
+  }
+
+  .gp-app-button--critical[data-ods='button']:disabled,
+  .gp-app-button--critical[data-ods='button'][disabled] {
+    background: #7f1d1d;
+    border-color: #7f1d1d;
+    color: #fca5a5;
+    opacity: 0.6;
   }
 
   .gp-app-button--ghost[data-ods='button'] {

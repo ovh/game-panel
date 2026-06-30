@@ -1,0 +1,14 @@
+export const CLIENT_ID = 'hytale-server';
+export const SCOPE = 'openid offline auth:server';
+export const DEVICE_AUTH_URL = 'https://oauth.accounts.hytale.com/oauth2/device/auth';
+export const TOKEN_URL = 'https://oauth.accounts.hytale.com/oauth2/token';
+export const PROFILES_URL = 'https://account-data.hytale.com/my-account/get-profiles';
+export const DOWNLOADER_URL = 'https://downloader.hytale.com/hytale-downloader.zip';
+export const DOWNLOADER_ENTRY = 'hytale-downloader-linux-amd64';
+export const DOWNLOADER_PROMPT_KIND = 'hytale_auth_required';
+export const PROFILE_PROMPT_KIND = 'hytale_profile_selection_required';
+export const INTERACTION_POLL_MS = 1000;
+export const DOWNLOADER_AUTH_TIMEOUT_MS = 15 * 60_000;
+export const DOWNLOADER_PRINT_VERSION_TIMEOUT_MS = 20 * 60_000;
+export const DOWNLOADER_DOWNLOAD_TIMEOUT_MS = 4 * 60 * 60_000;
+export const PROCESS_SIGKILL_DELAY_MS = 5000;

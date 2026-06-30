@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { BellRing, X } from 'lucide-react';
+import { AppButton } from '../src/ui/components';
 
 interface LogPromptToastItem {
   id: string;
@@ -169,14 +170,14 @@ function LogPromptToastCard({
           </div>
         </div>
 
-        <button
-          type="button"
+        <AppButton
+          tone="ghost"
           onClick={() => onClose(toast.id)}
           className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-white/5 hover:text-white"
           aria-label="Close notification"
         >
           <X className="h-4 w-4" />
-        </button>
+        </AppButton>
       </div>
     </div>
   );

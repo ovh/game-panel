@@ -14,17 +14,6 @@ export {
   AppModalTitle,
 } from './AppModal';
 export { AppSelect, type AppSelectOption, type AppSelectProps } from './AppSelect';
-export { AppStatusBadge, type AppStatusTone } from './AppStatusBadge';
+export { AppSlider, type AppSliderProps } from './AppSlider';
 export { AppTable, type AppTableProps } from './AppTable';
 export { AppToggle, type AppToggleProps } from './AppToggle';
-export {
-  AppTab,
-  AppTabContent,
-  AppTabList,
-  AppTabs,
-  type AppTabContentProps,
-  type AppTabListProps,
-  type AppTabProps,
-  type AppTabsProps,
-} from './AppTabs';
-export { AppTextarea, type AppTextareaProps } from './AppTextarea';

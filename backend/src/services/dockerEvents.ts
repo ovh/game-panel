@@ -1,17 +1,27 @@
 import { docker } from '../utils/docker/client.js';
 import { serverRepository } from '../database/index.js';
 import type { ServerStatus } from '../types/gameServer.js';
+import { inspectContainerRuntime } from '../utils/docker.js';
 import {
     completeServerTransition,
     mapDockerHealthToServerStatus,
     shouldIgnoreDockerHealthStatus,
 } from './serverTransitions.js';
+import { afterOvhcloudServerStopped } from './ovhcloudLifecycle.js';
+import { logError, logWarn, logInfo } from '../utils/logger.js';
 
 type HealthStatus = 'healthy' | 'unhealthy' | 'starting';
 
-async function applyDockerHealthStatus(serverId: number, health: HealthStatus): Promise<void> {
+async function applyDockerHealthStatus(serverId: number, containerId: string, health: HealthStatus): Promise<void> {
     const current = await serverRepository.findById(serverId);
     if (!current) return;
+
+    const runtime = await inspectContainerRuntime(containerId).catch(() => ({
+        containerStatus: 'running' as const,
+        healthStatus: health,
+    }));
+
+    await serverRepository.updateRuntimeState(serverId, runtime);
 
     if (shouldIgnoreDockerHealthStatus(serverId, health)) {
         return;
@@ -27,6 +37,52 @@ async function applyDockerHealthStatus(serverId: number, health: HealthStatus): 
     await serverRepository.updateStatusIfChanged(serverId, nextStatus);
 }
 
+async function applyDockerContainerState(serverId: number, containerId: string): Promise<void> {
+    const current = await serverRepository.findById(serverId);
+    if (!current) return;
+
+    const runtime = await inspectContainerRuntime(containerId);
+    const state = runtime.containerStatus;
+    const health = runtime.healthStatus;
+
+    if (state === 'running') {
+        if (health === 'none' || health === 'healthy') {
+            await serverRepository.updateRuntimeState(serverId, runtime);
+            await completeServerTransition(serverId, 'running');
+            return;
+        }
+
+        if (health === 'starting') {
+            await serverRepository.updateRuntimeState(serverId, runtime);
+            if (shouldIgnoreDockerHealthStatus(serverId, health)) {
+                return;
+            }
+
+            await serverRepository.updateRuntimeAndStatusIfChanged(serverId, {
+                status: 'unhealthy',
+                containerStatus: runtime.containerStatus,
+                healthStatus: runtime.healthStatus,
+            });
+            return;
+        }
+
+        await serverRepository.updateRuntimeAndStatusIfChanged(serverId, {
+            status: 'unhealthy',
+            containerStatus: runtime.containerStatus,
+            healthStatus: runtime.healthStatus,
+        });
+        return;
+    }
+
+    await afterOvhcloudServerStopped(serverId, current).catch(() => undefined);
+
+    await serverRepository.updateRuntimeAndStatusIfChanged(serverId, {
+        status: 'stopped',
+        containerStatus: runtime.containerStatus,
+        healthStatus: runtime.healthStatus,
+    });
+}
+
 function safeJsonParse(line: string): any | null {
     try {
         return JSON.parse(line);
@@ -35,9 +91,8 @@ function safeJsonParse(line: string): any | null {
     }
 }
 
-/**
- * One-shot sync at boot: reads current container health and updates DB.
- */
+
+// One-shot sync at boot: reads current container health and updates DB.
 export async function reconcileDockerHealthToDb(): Promise<void> {
     const containers = await docker.listContainers({
         all: true,
@@ -49,22 +104,17 @@ export async function reconcileDockerHealthToDb(): Promise<void> {
     for (const c of containers) {
         const containerId = c.Id;
         const labels = c.Labels ?? {};
+        if (labels['gamepanel.oneshot'] === 'true') continue;
+
         const serverIdStr = labels['gamepanel.serverId'];
         const serverId = serverIdStr ? Number(serverIdStr) : null;
 
         if (!serverId || !Number.isFinite(serverId)) continue;
 
         try {
-            const inspect = await docker.getContainer(containerId).inspect();
-
-            const health: HealthStatus | null =
-                (inspect?.State?.Health?.Status as HealthStatus | undefined) ?? null;
-
-            if (!health) continue;
-
-            await applyDockerHealthStatus(serverId, health);
+            await applyDockerContainerState(serverId, containerId);
         } catch (e) {
-            console.warn('[dockerEvents] reconcile inspect failed:', containerId, e);
+            logError('SERVICE:DOCKER_EVENTS:RECONCILE', e, { containerId });
         }
     }
 }
@@ -96,13 +146,11 @@ export function startDockerHealthEventListener(): { stop: () => void } {
 
                     if (evt.Type !== 'container') continue;
                     if (typeof evt.Action !== 'string') continue;
-                    if (!evt.Action.startsWith('health_status:')) continue;
 
                     const action = evt.Action; // e.g. "health_status: healthy"
-                    const health = action.split(':')[1]?.trim() as HealthStatus | undefined;
-                    if (!health) continue;
-
                     const attrs = evt.Actor?.Attributes ?? {};
+                    if (attrs['gamepanel.oneshot'] === 'true') continue;
+
                     const serverIdStr = attrs['gamepanel.serverId'];
                     const serverIdNum = serverIdStr ? Number(serverIdStr) : NaN;
 
@@ -111,31 +159,41 @@ export function startDockerHealthEventListener(): { stop: () => void } {
                     }
 
                     const serverId = serverIdNum;
+                    const containerId = String(evt.id ?? '');
+                    if (!containerId) continue;
 
                     try {
-                        await applyDockerHealthStatus(serverId, health);
+                        if (action.startsWith('health_status:')) {
+                            const health = action.split(':')[1]?.trim() as HealthStatus | undefined;
+                            if (health) await applyDockerHealthStatus(serverId, containerId, health);
+                            continue;
+                        }
+
+                        if (action === 'start' || action === 'die' || action === 'stop') {
+                            await applyDockerContainerState(serverId, containerId);
+                        }
                     } catch (e) {
-                        console.warn('[dockerEvents] updateStatusIfChanged failed:', { serverId, health }, e);
+                        logError('SERVICE:DOCKER_EVENTS:STATUS', e, { serverId, action });
                     }
                 }
             });
 
             stream.on('end', () => {
                 if (stopped) return;
-                console.warn('[dockerEvents] Docker event stream ended. Reconnecting...');
+                logWarn('SERVICE:DOCKER_EVENTS', 'Docker event stream ended; reconnecting');
                 setTimeout(() => startStream().catch(() => { }), 1000);
             });
 
             stream.on('error', (err) => {
                 if (stopped) return;
-                console.warn('[dockerEvents] Docker event stream error. Reconnecting...', err);
+                logError('SERVICE:DOCKER_EVENTS:STREAM', err);
                 setTimeout(() => startStream().catch(() => { }), 1000);
             });
 
-            console.log('Listening to Docker health_status events');
+            logInfo('SERVICE:DOCKER_EVENTS', 'Listening to Docker health_status events');
         } catch (err) {
             if (stopped) return;
-            console.warn('[dockerEvents] Failed to open Docker event stream. Retrying...', err);
+            logError('SERVICE:DOCKER_EVENTS:OPEN', err);
             setTimeout(() => startStream().catch(() => { }), 2000);
         }
     };

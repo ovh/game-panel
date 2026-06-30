@@ -1,15 +1,21 @@
 import { WS_URL } from './runtime';
+import { parseRealtimeMessage } from './realtimeMessages';
 
 type WebSocketListener = (data: any) => void;
+
+export type RealtimeConnectionStatus = 'connecting' | 'open' | 'reconnecting' | 'closed';
+type ConnectionStatusListener = (status: RealtimeConnectionStatus) => void;
 
 export class RealtimeGateway {
   private ws: WebSocket | null = null;
   private wsConnectPromise: Promise<void> | null = null;
   private allowReconnect = true;
   private reconnectAttempts = 0;
-  private readonly maxReconnectAttempts = 5;
-  private readonly reconnectDelay = 3000;
-  private pendingConsoleStatusSubscriptions = new Set<number>();
+  private readonly baseReconnectDelay = 1000;
+  private readonly maxReconnectDelay = 30000;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private status: RealtimeConnectionStatus = 'closed';
+  private statusListeners = new Set<ConnectionStatusListener>();
   private pendingMetricsSubscriptions = new Set<number>();
   private metricsHistoryLimitByServer = new Map<number, number>();
   private pendingLogsSubscriptions = new Set<number>();
@@ -25,7 +31,6 @@ export class RealtimeGateway {
   constructor(private readonly getAuthToken: () => string | null) {}
 
   resetState() {
-    this.pendingConsoleStatusSubscriptions.clear();
     this.pendingMetricsSubscriptions.clear();
     this.metricsHistoryLimitByServer.clear();
     this.pendingLogsSubscriptions.clear();
@@ -36,6 +41,32 @@ export class RealtimeGateway {
     this.pendingSystemMetricsHistoryLimit = null;
     this.pendingServersSubscription = false;
     this.wsListeners.clear();
+  }
+
+  getStatus(): RealtimeConnectionStatus {
+    return this.status;
+  }
+
+  /** Subscribe to connection-status changes. Immediately invokes with the current
+   *  status and returns an unsubscribe function. */
+  onStatusChange(listener: ConnectionStatusListener): () => void {
+    this.statusListeners.add(listener);
+    listener(this.status);
+    return () => {
+      this.statusListeners.delete(listener);
+    };
+  }
+
+  private setStatus(next: RealtimeConnectionStatus) {
+    if (this.status === next) return;
+    this.status = next;
+    this.statusListeners.forEach((listener) => {
+      try {
+        listener(next);
+      } catch (error) {
+        if (import.meta.env.DEV) console.error('Connection status listener error:', error);
+      }
+    });
   }
 
   private sendWebSocketAuth(ws: WebSocket, token: string) {
@@ -49,17 +80,6 @@ export class RealtimeGateway {
 
   private flushPendingSubscriptions() {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.wsAuthed) return;
-
-    if (this.pendingConsoleStatusSubscriptions.size > 0) {
-      this.pendingConsoleStatusSubscriptions.forEach((serverId) => {
-        this.ws!.send(
-          JSON.stringify({
-            type: 'subscribe:console-status',
-            serverId,
-          })
-        );
-      });
-    }
 
     if (this.pendingMetricsSubscriptions.size > 0) {
       this.pendingMetricsSubscriptions.forEach((serverId) => {
@@ -150,6 +170,7 @@ export class RealtimeGateway {
 
     this.allowReconnect = true;
     this.wsAuthed = false;
+    this.setStatus(this.reconnectAttempts > 0 ? 'reconnecting' : 'connecting');
 
     const connectPromise = new Promise<void>((resolve, reject) => {
       try {
@@ -157,7 +178,24 @@ export class RealtimeGateway {
         this.ws = ws;
 
         ws.onmessage = (event) => {
-          const data = JSON.parse(event.data);
+          let data: any;
+          try {
+            data = JSON.parse(event.data);
+          } catch (error) {
+            // Ignore malformed/non-JSON frames instead of throwing inside the
+            // message pump, which would otherwise abort processing of the frame.
+            if (import.meta.env.DEV) console.error('Failed to parse WebSocket frame:', error);
+            return;
+          }
+          // Dev-only observability for protocol drift — never drops or mutates frames.
+          if (import.meta.env.DEV) {
+            const check = parseRealtimeMessage(data);
+            if (!check.ok) {
+              console.warn('[WS] Unexpected frame shape (no string `type`):', data);
+            } else if (!check.knownType) {
+              console.warn('[WS] Unknown message type:', check.message?.type);
+            }
+          }
           const isAuthEvent = data?.type === 'auth:success' || data?.type === 'auth:ok';
           if (isAuthEvent && !this.wsAuthed) {
             this.wsAuthed = true;
@@ -169,7 +207,7 @@ export class RealtimeGateway {
               try {
                 listener(data);
               } catch (error) {
-                console.error('WebSocket listener error:', error);
+                if (import.meta.env.DEV) console.error('WebSocket listener error:', error);
               }
             });
           }
@@ -177,12 +215,17 @@ export class RealtimeGateway {
 
         ws.onopen = () => {
           this.reconnectAttempts = 0;
+          if (this.reconnectTimer !== null) {
+            clearTimeout(this.reconnectTimer);
+            this.reconnectTimer = null;
+          }
+          this.setStatus('open');
           this.sendWebSocketAuth(ws, token);
           resolve();
         };
 
         ws.onerror = (error) => {
-          console.error('WebSocket error:', error);
+          if (import.meta.env.DEV) console.error('WebSocket error:', error);
           if (this.wsConnectPromise) {
             reject(error);
           }
@@ -195,7 +238,10 @@ export class RealtimeGateway {
           this.wsAuthed = false;
           this.wsConnectPromise = null;
           if (this.allowReconnect) {
+            this.setStatus('reconnecting');
             this.attemptReconnect();
+          } else {
+            this.setStatus('closed');
           }
         };
       } catch (error) {
@@ -215,20 +261,31 @@ export class RealtimeGateway {
   }
 
   private attemptReconnect() {
-    if (!this.allowReconnect || !this.getAuthToken()) return;
-    if (this.reconnectAttempts < this.maxReconnectAttempts) {
-      this.reconnectAttempts++;
-      console.log(
-        `Attempting to reconnect WebSocket (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})...`
-      );
-      setTimeout(() => {
-        this.connect().catch((error) => {
-          console.error('Reconnection failed:', error);
-        });
-      }, this.reconnectDelay * this.reconnectAttempts);
-    } else {
-      console.error('Max reconnection attempts reached');
+    if (!this.allowReconnect || !this.getAuthToken()) {
+      this.setStatus('closed');
+      return;
     }
+    if (this.reconnectTimer !== null) return;
+
+    this.reconnectAttempts++;
+    // Capped exponential backoff with jitter, retrying indefinitely so a transient
+    // outage always recovers — no hard give-up that would silently freeze the UI on
+    // stale data. The jitter avoids a thundering-herd reconnect after a backend restart.
+    const exponent = Math.min(this.reconnectAttempts, 6);
+    const delay =
+      Math.min(this.maxReconnectDelay, this.baseReconnectDelay * 2 ** exponent) +
+      Math.floor(Math.random() * 1000);
+
+    if (import.meta.env.DEV) {
+      console.log(`Reconnecting WebSocket in ${delay}ms (attempt ${this.reconnectAttempts})...`);
+    }
+
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect().catch((error) => {
+        if (import.meta.env.DEV) console.error('Reconnection failed:', error);
+      });
+    }, delay);
   }
 
   send(message: any) {
@@ -407,38 +464,6 @@ export class RealtimeGateway {
     }
   }
 
-  subscribeConsoleStatus(serverId: number) {
-    this.pendingConsoleStatusSubscriptions.add(serverId);
-    if (this.ws && this.ws.readyState === WebSocket.OPEN && this.wsAuthed) {
-      this.ws.send(
-        JSON.stringify({
-          type: 'subscribe:console-status',
-          serverId,
-        })
-      );
-    }
-  }
-
-  unsubscribeConsoleStatus(serverId: number) {
-    this.pendingConsoleStatusSubscriptions.delete(serverId);
-    if (this.ws && this.ws.readyState === WebSocket.OPEN && this.wsAuthed) {
-      this.ws.send(
-        JSON.stringify({
-          type: 'unsubscribe',
-          channel: 'console-status',
-          serverId,
-        })
-      );
-    }
-  }
-
-  sendServerAction(serverId: number, action: 'start' | 'stop' | 'restart') {
-    this.send({
-      type: `action:${action}`,
-      serverId,
-    });
-  }
-
   createAuthenticatedWebSocket(): Promise<WebSocket> {
     const token = this.getAuthToken();
     if (!token) {
@@ -507,10 +532,15 @@ export class RealtimeGateway {
     this.allowReconnect = false;
     this.wsAuthed = false;
     this.wsConnectPromise = null;
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     if (this.ws) {
       this.ws.close();
       this.ws = null;
     }
+    this.setStatus('closed');
   }
 
   getWebSocketUrl(): string {

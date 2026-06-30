@@ -1,31 +1,31 @@
 import { Router, type Request, type Response } from 'express';
 import { requireGlobalPermission } from '../middleware/auth.js';
 import { userRepository, serverMemberRepository, serverRepository } from '../database/index.js';
-import { logError } from '../utils/logger.js';
+import { sendRouteError } from '../utils/routeErrors.js';
+import { PERMISSIONS, ASSIGNABLE_SERVER_PERMISSIONS } from '../permissions.js';
+import { toIsoTimestamp } from '../utils/time.js';
+import { requireBodyObject, requirePositiveInt, stringArray } from '../utils/httpValidation.js';
 
 const router = Router();
 
-function parsePositiveNumber(value: unknown): number | null {
-    const n = typeof value === 'string' ? Number(value) : typeof value === 'number' ? value : NaN;
-    return Number.isFinite(n) && n > 0 ? n : null;
+function assertAssignableServerPermissions(permissions: string[], res: Response): boolean {
+    const invalid = permissions.filter((permission) => !ASSIGNABLE_SERVER_PERMISSIONS.has(permission));
+    if (invalid.length > 0) {
+        res.status(400).json({
+            error: `Unknown or non-assignable server permissions: ${invalid.join(', ')}`,
+        });
+        return false;
+    }
+    return true;
 }
 
-function parsePermissions(value: unknown): string[] | null {
-    if (!Array.isArray(value)) return null;
-    const perms = value.filter((x) => typeof x === 'string' && x.trim() !== '');
-    return perms.length === value.length ? perms : null;
-}
-
-/**
- * GET /servers/:id/members
- */
+// GET /api/servers/:id/members
 router.get(
     '/:id/members',
-    requireGlobalPermission('users.manage'),
+    requireGlobalPermission(PERMISSIONS.users.manage),
     async (req: Request, res: Response) => {
         try {
-            const serverId = parsePositiveNumber(req.params.id);
-            if (!serverId) return res.status(400).json({ error: 'Invalid server id' });
+            const serverId = requirePositiveInt(req.params.id, 'Invalid server id');
 
             const server = await serverRepository.findById(serverId);
             if (!server) return res.status(404).json({ error: 'Server not found' });
@@ -33,7 +33,7 @@ router.get(
             const members = await serverMemberRepository.listByServer(serverId);
 
             // Return parsed permission arrays rather than raw JSON payloads.
-            const normalized = members.map((m: any) => {
+            const normalized = members.map((m) => {
                 let permissions: string[] = [];
                 try {
                     const parsed = JSON.parse(m.permissions_json ?? '[]');
@@ -48,36 +48,34 @@ router.get(
                     userId: m.user_id,
                     username: m.username,
                     permissions,
-                    createdAt: m.created_at,
-                    updatedAt: m.updated_at,
+                    createdAt: toIsoTimestamp(m.created_at),
+                    updatedAt: toIsoTimestamp(m.updated_at),
                 };
             });
 
             return res.json({ members: normalized });
         } catch (error) {
-            logError('ROUTE:SERVER_MEMBERS:LIST', error, { serverId: req.params.id });
-            return res.status(500).json({ error: 'Failed to list server members' });
+            return sendRouteError(res, error, {
+                route: 'ROUTE:SERVER_MEMBERS:LIST',
+                fallbackMessage: 'Failed to list server members',
+                logContext: { serverId: req.params.id },
+            });
         }
     }
 );
 
-/**
- * POST /servers/:id/members
- * Add a user to a server with explicit permissions.
- */
+// POST /api/servers/:id/members
 router.post(
     '/:id/members',
-    requireGlobalPermission('users.manage'),
+    requireGlobalPermission(PERMISSIONS.users.manage),
     async (req: Request, res: Response) => {
         try {
-            const serverId = parsePositiveNumber(req.params.id);
-            if (!serverId) return res.status(400).json({ error: 'Invalid server id' });
+            const serverId = requirePositiveInt(req.params.id, 'Invalid server id');
+            const body = requireBodyObject(req.body);
 
-            const userId = parsePositiveNumber((req.body as any)?.userId);
-            const permissions = parsePermissions((req.body as any)?.permissions);
-            if (!userId || !permissions) {
-                return res.status(400).json({ error: 'Missing or invalid userId/permissions' });
-            }
+            const userId = requirePositiveInt(body.userId, 'Missing or invalid userId/permissions');
+            const permissions = stringArray(body.permissions, 'Missing or invalid userId/permissions');
+            if (!assertAssignableServerPermissions(permissions, res)) return;
 
             const server = await serverRepository.findById(serverId);
             if (!server) return res.status(404).json({ error: 'Server not found' });
@@ -92,29 +90,28 @@ router.post(
 
             return res.status(201).json({ success: true });
         } catch (error) {
-            logError('ROUTE:SERVER_MEMBERS:CREATE', error, { serverId: req.params.id });
-            return res.status(500).json({ error: 'Failed to add server member' });
+            return sendRouteError(res, error, {
+                route: 'ROUTE:SERVER_MEMBERS:CREATE',
+                fallbackMessage: 'Failed to add server member',
+                logContext: { serverId: req.params.id },
+            });
         }
     }
 );
 
-/**
- * PATCH /servers/:id/members/:userId
- * Update permissions for an existing membership.
- */
+// PATCH /api/servers/:id/members/:userId
 router.patch(
     '/:id/members/:userId',
-    requireGlobalPermission('users.manage'),
+    requireGlobalPermission(PERMISSIONS.users.manage),
     async (req: Request, res: Response) => {
         try {
-            const serverId = parsePositiveNumber(req.params.id);
-            if (!serverId) return res.status(400).json({ error: 'Invalid server id' });
+            const serverId = requirePositiveInt(req.params.id, 'Invalid server id');
 
-            const userId = parsePositiveNumber(req.params.userId);
-            if (!userId) return res.status(400).json({ error: 'Invalid user id' });
+            const userId = requirePositiveInt(req.params.userId, 'Invalid user id');
+            const body = requireBodyObject(req.body);
 
-            const permissions = parsePermissions((req.body as any)?.permissions);
-            if (!permissions) return res.status(400).json({ error: 'Missing or invalid permissions' });
+            const permissions = stringArray(body.permissions, 'Missing or invalid permissions');
+            if (!assertAssignableServerPermissions(permissions, res)) return;
 
             const existing = await serverMemberRepository.find(serverId, userId);
             if (!existing) return res.status(404).json({ error: 'Membership not found' });
@@ -123,28 +120,27 @@ router.patch(
 
             return res.json({ success: true });
         } catch (error) {
-            logError('ROUTE:SERVER_MEMBERS:UPDATE', error, {
-                serverId: req.params.id,
-                userId: req.params.userId,
+            return sendRouteError(res, error, {
+                route: 'ROUTE:SERVER_MEMBERS:UPDATE',
+                fallbackMessage: 'Failed to update server member',
+                logContext: {
+                    serverId: req.params.id,
+                    userId: req.params.userId,
+                },
             });
-            return res.status(500).json({ error: 'Failed to update server member' });
         }
     }
 );
 
-/**
- * DELETE /servers/:id/members/:userId
- */
+// DELETE /api/servers/:id/members/:userId
 router.delete(
     '/:id/members/:userId',
-    requireGlobalPermission('users.manage'),
+    requireGlobalPermission(PERMISSIONS.users.manage),
     async (req: Request, res: Response) => {
         try {
-            const serverId = parsePositiveNumber(req.params.id);
-            if (!serverId) return res.status(400).json({ error: 'Invalid server id' });
+            const serverId = requirePositiveInt(req.params.id, 'Invalid server id');
 
-            const userId = parsePositiveNumber(req.params.userId);
-            if (!userId) return res.status(400).json({ error: 'Invalid user id' });
+            const userId = requirePositiveInt(req.params.userId, 'Invalid user id');
 
             const existing = await serverMemberRepository.find(serverId, userId);
             if (!existing) return res.status(404).json({ error: 'Membership not found' });
@@ -153,11 +149,14 @@ router.delete(
 
             return res.json({ success: true });
         } catch (error) {
-            logError('ROUTE:SERVER_MEMBERS:DELETE', error, {
-                serverId: req.params.id,
-                userId: req.params.userId,
+            return sendRouteError(res, error, {
+                route: 'ROUTE:SERVER_MEMBERS:DELETE',
+                fallbackMessage: 'Failed to remove server member',
+                logContext: {
+                    serverId: req.params.id,
+                    userId: req.params.userId,
+                },
             });
-            return res.status(500).json({ error: 'Failed to remove server member' });
         }
     }
 );

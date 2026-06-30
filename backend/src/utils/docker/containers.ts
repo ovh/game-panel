@@ -1,85 +1,88 @@
 import { docker } from './client.js';
-import { ensureServerDataDirs } from '../storage.js';
-import type { NormalizedPortMappings } from '../ports.js';
-import type { Readable } from 'stream';
+import { randomUUID } from 'node:crypto';
+import { logInfo } from '../logger.js';
+import type { NormalizedPorts } from '../ports.js';
+import type { ServerMountPath } from '../storage.js';
+import type { NormalizedHealthcheck } from '../healthcheck.js';
+import type { NormalizedResourceLimits } from '../resourceLimits.js';
+import { resourceLimitsToDockerHostConfig, resourceLimitsToDockerUpdatePayload } from '../resourceLimits.js';
+import type { ServerProvider } from '../../providers/types.js';
+import { PassThrough, type Readable } from 'stream';
+import type { ContainerStatus, HealthStatus } from '../../types/gameServer.js';
 
 interface ContainerInfo {
     id: string;
     name: string;
     status: string;
+    healthcheckDefined: boolean;
 }
 
-export type ContainerHealthStatus = 'healthy' | 'unhealthy' | 'starting';
+export type ContainerHealthStatus = Extract<HealthStatus, 'healthy' | 'unhealthy' | 'starting'>;
 
 export interface ContainerRuntimeState {
-    containerStatus: string;
-    healthStatus: ContainerHealthStatus | null;
+    containerStatus: ContainerStatus;
+    healthStatus: HealthStatus;
 }
 
-export type HealthcheckPayload =
-    | { type: 'default' }
-    | { type: 'tcp_connect'; port: number }
-    | { type: 'process'; name: string };
-
-type CatalogHealthcheck =
-    | { type: 'tcp_connect'; port: number }
-    | { type: 'process'; name: string }
-    | { type: 'default' };
-
-export type NormalizedHealthcheck =
-    | { type: 'tcp_connect'; port: number }
-    | { type: 'process'; name: string };
-
-export function normalizeHealthcheckPayload(
-    payload?: HealthcheckPayload
-): NormalizedHealthcheck | null {
-    if (!payload || !payload.type || payload.type === 'default') {
-        return null; // let image default healthcheck run
-    }
-
-    if (payload.type === 'tcp_connect') {
-        const port = Number(payload.port);
-        if (!Number.isInteger(port) || port < 1 || port > 65535) {
-            throw new Error('healthcheck.tcp_connect requires a valid port (1..65535)');
-        }
-        return { type: 'tcp_connect', port };
-    }
-
-    if (payload.type === 'process') {
-        const name = (payload as any).name;
-        if (!name || typeof name !== 'string' || !name.trim()) {
-            throw new Error('healthcheck.process requires a non-empty "name"');
-        }
-        return { type: 'process', name: name.trim() };
-    }
-
-    throw new Error(`Unsupported healthcheck type: ${String((payload as any).type)}`);
-}
-
-type ContainerSpec = {
-    gameKey: string;
+export type ContainerRuntimeSpec = {
+    provider: ServerProvider;
+    catalogId: string | null;
     image: string;
-    healthcheck: CatalogHealthcheck | null;
+    env?: string[];
+    labels?: Record<string, string>;
+    mounts: ServerMountPath[];
+    ports: NormalizedPorts;
+    healthcheck: NormalizedHealthcheck | null;
+    resourceLimits?: NormalizedResourceLimits;
+    restartPolicy?: 'no' | 'unless-stopped';
+    start?: boolean;
+};
+
+export type OneShotContainerSpec = {
+    image: string;
+    namePrefix: string;
+    cmd: string[];
+    env?: string[];
+    mounts: ServerMountPath[];
+    user?: string;
+    workdir?: string;
+    labels?: Record<string, string>;
+};
+
+export type PublishedHostPort = {
+    protocol: 'tcp' | 'udp';
+    hostPort: number;
+    containerId: string;
+    containerName: string;
+    labels: Record<string, string>;
 };
 
 function sanitizeContainerName(name: string): string {
-    return name.toLowerCase().replace(/[^a-z0-9_.-]+/g, '-');
+    return name
+        .toLowerCase()
+        .replace(/[^a-z0-9_.-]+/g, '-')
+        .replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, '');
 }
 
-function buildPortMaps(mappings: NormalizedPortMappings): {
+export function buildManagedContainerName(serverId: number, name: string): string {
+    const slug = sanitizeContainerName(name) || 'server';
+    return `${slug}-${serverId}`;
+}
+
+function buildPortMaps(ports: NormalizedPorts): {
     exposedPorts: Record<string, {}>;
     portBindings: Record<string, Array<{ HostPort: string }>>;
 } {
     const exposedPorts: Record<string, {}> = {};
     const portBindings: Record<string, Array<{ HostPort: string }>> = {};
 
-    for (const m of mappings.tcp) {
+    for (const m of ports.tcp) {
         const key = `${m.container}/tcp`;
         exposedPorts[key] = {};
         portBindings[key] = [{ HostPort: String(m.host) }];
     }
 
-    for (const m of mappings.udp) {
+    for (const m of ports.udp) {
         const key = `${m.container}/udp`;
         exposedPorts[key] = {};
         portBindings[key] = [{ HostPort: String(m.host) }];
@@ -92,8 +95,41 @@ function escapeRegexLiteral(s: string): string {
     return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function ns(seconds: number): number {
+    return seconds * 1_000_000_000;
+}
+
+function normalizeContainerStatus(value: unknown): ContainerStatus {
+    switch (value) {
+        case 'created':
+        case 'running':
+        case 'paused':
+        case 'restarting':
+        case 'removing':
+        case 'exited':
+        case 'dead':
+            return value;
+        default:
+            return 'unknown';
+    }
+}
+
+function normalizeHealthStatus(value: unknown): HealthStatus {
+    switch (value) {
+        case 'starting':
+        case 'healthy':
+        case 'unhealthy':
+            return value;
+        case undefined:
+        case null:
+            return 'none';
+        default:
+            return 'unknown';
+    }
+}
+
 export async function pullImageByName(image: string): Promise<void> {
-    console.log(`Pulling image: ${image}`);
+    logInfo('DOCKER', `Pulling image: ${image}`);
 
     await new Promise<void>((resolve, reject) => {
         docker.pull(image, (err: Error | null, stream: Readable | undefined) => {
@@ -108,105 +144,209 @@ export async function pullImageByName(image: string): Promise<void> {
     });
 }
 
-export async function createContainer(
-    spec: ContainerSpec,
-    serverId: number,
-    name: string,
-    mappings: NormalizedPortMappings
-): Promise<ContainerInfo> {
-    const safeName = sanitizeContainerName(name);
-    const { exposedPorts, portBindings } = buildPortMaps(mappings);
+async function imageHasHealthcheck(image: string): Promise<boolean> {
+    try {
+        const imageInspect = await docker.getImage(image).inspect();
+        const test = imageInspect?.Config?.Healthcheck?.Test;
+        return Array.isArray(test) && test.length > 0 && test[0] !== 'NONE';
+    } catch {
+        return false;
+    }
+}
 
-    console.log(`Creating container: ${safeName}\nGame: ${spec.gameKey}\nImage: ${spec.image}`);
+export async function imageExists(image: string): Promise<boolean> {
+    try {
+        await docker.getImage(image).inspect();
+        return true;
+    } catch {
+        return false;
+    }
+}
 
-    const { dataDir, backupDir } = await ensureServerDataDirs(serverId);
+function buildDockerHealthcheck(hc: NormalizedHealthcheck | null): any | undefined {
+    if (!hc) return undefined;
 
-    const ns = (seconds: number) => seconds * 1_000_000_000;
+    if (hc.mode === 'disabled') {
+        return { Test: ['NONE'] };
+    }
 
-    // Keep the image-defined healthcheck when no explicit override is requested.
-    const hc = spec.healthcheck;
-    let healthcheck: any | undefined;
+    const base = {
+        Interval: ns(hc.intervalSeconds),
+        Timeout: ns(hc.timeoutSeconds),
+        StartPeriod: ns(hc.startPeriodSeconds),
+        Retries: hc.retries,
+    };
 
-    if (hc?.type === 'tcp_connect') {
-        const probePort = Number(hc.port);
-        if (!Number.isInteger(probePort) || probePort < 1 || probePort > 65535) {
-            throw new Error(`[createContainer] Invalid tcp_connect port: ${String(hc.port)}`);
-        }
-
-        healthcheck = {
-            Test: ['CMD-SHELL', `timeout 5 bash -c '</dev/tcp/127.0.0.1/${probePort}'`],
-            Interval: ns(3),
-            Timeout: ns(2),
-            StartPeriod: ns(480),
-            Retries: 2,
+    if (hc.probe.type === 'tcp_connect') {
+        return {
+            Test: ['CMD-SHELL', `timeout ${hc.timeoutSeconds} bash -lc '</dev/tcp/127.0.0.1/${hc.probe.port}'`],
+            ...base,
         };
-    } else if (hc?.type === 'process') {
-        const processName = (hc as any).name;
+    }
 
-        if (!processName || typeof processName !== 'string') {
-            throw new Error(`[createContainer] healthcheck.type=process requires a process name`);
-        }
-
-        const safeLiteral = processName.replace(/"/g, '\\"');
+    if (hc.probe.type === 'process') {
+        const safeLiteral = hc.probe.name.replace(/"/g, '\\"');
         const escaped = escapeRegexLiteral(safeLiteral);
         const pattern = `[${escaped[0]}]${escaped.slice(1)}`;
-
-        healthcheck = {
+        return {
             Test: ['CMD-SHELL', `pgrep -f "${pattern}" >/dev/null || exit 1`],
-            Interval: ns(3),
-            Timeout: ns(2),
-            StartPeriod: ns(480),
-            Retries: 2,
+            ...base,
         };
-    } else {
-        // hc null/undefined/default => keep the image-defined healthcheck when available,
-        // but extend the start period to match the panel install grace window.
-        const imageInspect = await docker.getImage(spec.image).inspect();
-        const imageHealthcheck = imageInspect?.Config?.Healthcheck;
-
-        if (imageHealthcheck?.Test) {
-            healthcheck = {
-                ...imageHealthcheck,
-                StartPeriod: ns(480),
-            };
-        } else {
-            healthcheck = undefined;
-        }
     }
+
+    return {
+        Test: ['CMD', ...hc.probe.command],
+        ...base,
+    };
+}
+function buildBinds(mounts: ServerMountPath[]): string[] {
+    return mounts.map((mount) => `${mount.hostPath}:${mount.containerPath}`);
+}
+
+export async function createContainer(
+    spec: ContainerRuntimeSpec,
+    serverId: number,
+    name: string
+): Promise<ContainerInfo> {
+    const safeName = sanitizeContainerName(name);
+    const { exposedPorts, portBindings } = buildPortMaps(spec.ports);
+    const healthcheck = buildDockerHealthcheck(spec.healthcheck);
+    const healthcheckDefined = healthcheck
+        ? healthcheck.Test?.[0] !== 'NONE'
+        : await imageHasHealthcheck(spec.image);
+
+    logInfo('DOCKER', `Creating container ${safeName} (provider=${spec.provider}, image=${spec.image})`);
 
     const container = await docker.createContainer({
         Image: spec.image,
         name: safeName,
         Hostname: safeName,
-        Env: [`GAME_KEY=${spec.gameKey}`],
+        Env: [
+            `GAMEPANEL_PROVIDER=${spec.provider}`,
+            ...(spec.catalogId ? [`GAMEPANEL_CATALOG_ID=${spec.catalogId}`] : []),
+            ...(spec.env ?? []),
+        ],
         Labels: {
             'gamepanel.serverId': String(serverId),
-            'gamepanel.gameKey': String(spec.gameKey),
+            'gamepanel.provider': spec.provider,
             'gamepanel.managed': 'true',
+            ...(spec.catalogId ? { 'gamepanel.catalogId': spec.catalogId } : {}),
+            ...(spec.labels ?? {}),
         },
         ExposedPorts: exposedPorts,
         ...(healthcheck ? { Healthcheck: healthcheck } : {}),
         HostConfig: {
             PortBindings: portBindings,
-            RestartPolicy: { Name: 'always' },
-            Binds: [`${dataDir}:/data`, `${backupDir}:/app/lgsm/backup`],
+            RestartPolicy: { Name: spec.restartPolicy ?? 'unless-stopped' },
+            Binds: buildBinds(spec.mounts),
+            ...resourceLimitsToDockerHostConfig(spec.resourceLimits ?? null),
         },
     });
 
-    await container.start();
-    return { id: container.id, name: safeName, status: 'running' };
+    const shouldStart = spec.start !== false;
+    if (shouldStart) {
+        try {
+            await container.start();
+        } catch (error) {
+            try {
+                await container.remove({ force: true });
+            } catch {
+                // If Docker failed during start, remove is best-effort only.
+            }
+            throw error;
+        }
+    }
+
+    return {
+        id: container.id,
+        name: safeName,
+        status: shouldStart ? 'running' : 'created',
+        healthcheckDefined,
+    };
+}
+
+export async function runOneShotContainer(
+    spec: OneShotContainerSpec
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+    const safeName = sanitizeContainerName(`${spec.namePrefix}-${randomUUID().slice(0, 8)}`);
+
+    const container = await docker.createContainer({
+        Image: spec.image,
+        name: safeName,
+        Cmd: spec.cmd,
+        Env: spec.env ?? [],
+        User: spec.user,
+        WorkingDir: spec.workdir,
+        AttachStdout: true,
+        AttachStderr: true,
+        Labels: {
+            'gamepanel.managed': 'true',
+            'gamepanel.oneshot': 'true',
+            ...(spec.labels ?? {}),
+        },
+        HostConfig: {
+            Binds: buildBinds(spec.mounts),
+            AutoRemove: false,
+        },
+    });
+
+    try {
+        const stream = (await container.attach({
+            stream: true,
+            stdout: true,
+            stderr: true,
+        })) as unknown as NodeJS.ReadableStream;
+
+        const stdoutChunks: Buffer[] = [];
+        const stderrChunks: Buffer[] = [];
+        const stdout = new PassThrough();
+        const stderr = new PassThrough();
+
+        (docker as any).modem.demuxStream(stream, stdout, stderr);
+
+        stdout.on('data', (chunk: Buffer) => stdoutChunks.push(chunk));
+        stderr.on('data', (chunk: Buffer) => stderrChunks.push(chunk));
+
+        const streamEnded = new Promise<void>((resolve, reject) => {
+            stream.on('end', resolve);
+            stream.on('error', reject);
+        });
+
+        await container.start();
+        const result = await container.wait();
+        await streamEnded.catch(() => undefined);
+
+        return {
+            exitCode: Number(result.StatusCode ?? -1),
+            stdout: Buffer.concat(stdoutChunks).toString('utf-8'),
+            stderr: Buffer.concat(stderrChunks).toString('utf-8'),
+        };
+    } finally {
+        try {
+            await container.remove({ force: true });
+        } catch {
+            // Best effort cleanup for short-lived maintenance containers.
+        }
+    }
 }
 
 export async function startContainer(containerId: string): Promise<void> {
     await docker.getContainer(containerId).start();
 }
 
-export async function stopContainer(containerId: string): Promise<void> {
-    await docker.getContainer(containerId).stop({ t: 30 });
+export async function stopContainer(containerId: string, timeoutSeconds = 30): Promise<void> {
+    await docker.getContainer(containerId).stop({ t: timeoutSeconds });
 }
 
-export async function restartContainer(containerId: string): Promise<void> {
-    await docker.getContainer(containerId).restart({ t: 30 });
+export async function restartContainer(containerId: string, timeoutSeconds = 30): Promise<void> {
+    await docker.getContainer(containerId).restart({ t: timeoutSeconds });
+}
+
+export async function updateContainerResourceLimits(
+    containerId: string,
+    limits: NormalizedResourceLimits
+): Promise<void> {
+    await docker.getContainer(containerId).update(resourceLimitsToDockerUpdatePayload(limits));
 }
 
 export async function removeContainer(containerId: string): Promise<void> {
@@ -221,6 +361,80 @@ export async function removeContainer(containerId: string): Promise<void> {
     await c.remove({ force: true });
 }
 
+export async function removeManagedContainersForServer(serverId: number): Promise<void> {
+    const containers = await docker.listContainers({
+        all: true,
+        filters: {
+            label: [
+                'gamepanel.managed=true',
+                `gamepanel.serverId=${serverId}`,
+            ],
+        } as any,
+    });
+
+    await Promise.all(
+        containers.map(async (container) => {
+            try {
+                await removeContainer(container.Id);
+            } catch {
+                // Deletion flow is best-effort; callers still remove DB/data.
+            }
+        })
+    );
+}
+
+export async function listPublishedHostPorts(params?: {
+    excludeContainerIds?: string[];
+    excludeServerIds?: number[];
+}): Promise<PublishedHostPort[]> {
+    const excludedContainerIds = new Set(params?.excludeContainerIds ?? []);
+    const excludedServerIds = new Set((params?.excludeServerIds ?? []).map(String));
+    const containers = await docker.listContainers({ all: true });
+    const published: PublishedHostPort[] = [];
+
+    await Promise.all(
+        containers.map(async (containerSummary) => {
+            if (excludedContainerIds.has(containerSummary.Id)) return;
+
+            let info: any;
+            try {
+                info = await docker.getContainer(containerSummary.Id).inspect();
+            } catch {
+                return;
+            }
+
+            const labels = (info?.Config?.Labels ?? {}) as Record<string, string>;
+            if (excludedServerIds.has(String(labels['gamepanel.serverId'] ?? ''))) return;
+
+            const bindings = info?.HostConfig?.PortBindings;
+            if (!bindings || typeof bindings !== 'object') return;
+
+            const containerName = String(info?.Name ?? containerSummary.Names?.[0] ?? containerSummary.Id).replace(/^\//, '');
+
+            for (const [containerPort, hostBindings] of Object.entries(bindings)) {
+                const [, rawProtocol] = containerPort.split('/');
+                if (rawProtocol !== 'tcp' && rawProtocol !== 'udp') continue;
+                if (!Array.isArray(hostBindings)) continue;
+
+                for (const binding of hostBindings) {
+                    const hostPort = Number.parseInt(String((binding as any)?.HostPort ?? ''), 10);
+                    if (!Number.isInteger(hostPort) || hostPort < 1 || hostPort > 65535) continue;
+
+                    published.push({
+                        protocol: rawProtocol,
+                        hostPort,
+                        containerId: containerSummary.Id,
+                        containerName,
+                        labels,
+                    });
+                }
+            }
+        })
+    );
+
+    return published;
+}
+
 export async function checkContainerStatus(containerId: string): Promise<string> {
     const info = await docker.getContainer(containerId).inspect();
     return info.State.Status;
@@ -229,7 +443,7 @@ export async function checkContainerStatus(containerId: string): Promise<string>
 export async function inspectContainerRuntime(containerId: string): Promise<ContainerRuntimeState> {
     const info = await docker.getContainer(containerId).inspect();
     return {
-        containerStatus: info?.State?.Status ?? 'unknown',
-        healthStatus: (info?.State?.Health?.Status as ContainerHealthStatus | undefined) ?? null,
+        containerStatus: normalizeContainerStatus(info?.State?.Status),
+        healthStatus: normalizeHealthStatus(info?.State?.Health?.Status),
     };
 }

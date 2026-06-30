@@ -1,5 +1,5 @@
 import type { GameServer, GameServerStatus } from '../types/gameServer';
-import { useDeferredValue, useState, useMemo, useEffect, useRef } from 'react';
+import { lazy, Suspense, useDeferredValue, useState, useMemo, useEffect, useRef } from 'react';
 import { ServerSettingsModal } from './ServerSettingsModal';
 import { ConfirmationModal } from './ConfirmationModal';
 import type { AuthUser } from '../utils/permissions';
@@ -9,17 +9,21 @@ import {
   type ServerHistoryEntry,
   type ServerMetricHistoryPoint,
 } from '../utils/serverRuntime';
-import { GameServersTableDialogs } from './gameServersTable/GameServersTableDialogs';
+// Lazily loaded: the metric-history dialog pulls in recharts. Deferred until the user
+// first opens a connection/metric/history dialog, keeping recharts off initial load.
+const GameServersTableDialogs = lazy(() =>
+  import('./gameServersTable/GameServersTableDialogs').then((m) => ({
+    default: m.GameServersTableDialogs,
+  }))
+);
 import { GameServersMobileList } from './gameServersTable/GameServersMobileList';
 import { GameServersDesktopTable } from './gameServersTable/GameServersDesktopTable';
-import { AppButton } from '../src/ui/components';
 import { ODS_CHART_THEME } from './charts/theme';
 import {
   type MetricType,
   type SortField,
   type SortOrder,
   METRICS_HISTORY_REQUEST_LIMIT,
-  formatMetricValue,
   getMetricZoomedData,
 } from './gameServersTable/utils';
 
@@ -28,12 +32,10 @@ interface GameServersTableProps {
   metricsHistoryByServer?: Record<string, ServerMetricHistoryPoint[]>;
   historyByServer?: Record<string, ServerHistoryEntry[]>;
   gameNamesByKey: Record<string, string>;
-  terminalReadyByServer?: Record<string, boolean | null>;
   currentUser?: AuthUser | null;
   permissionsByServer?: Record<string, string[]>;
   onDelete: (id: string) => void;
   onAction: (serverId: string, serverName: string, action: string) => void;
-  onOpenConsoleTerminal: (serverId: string, serverName: string) => void;
   onRename: (id: string, newName: string) => Promise<void> | void;
   onRefresh: () => void;
   onStartAll: () => void;
@@ -53,14 +55,11 @@ export function GameServersTable({
   metricsHistoryByServer,
   historyByServer,
   gameNamesByKey,
-  terminalReadyByServer,
   currentUser,
   permissionsByServer,
   onDelete,
   onAction,
-  onOpenConsoleTerminal,
   onRename,
-  onRefresh,
   onStartAll,
   onStopAll,
   canInstall = false,
@@ -68,8 +67,6 @@ export function GameServersTable({
 }: GameServersTableProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
-  const [consoleBlinkByServer, setConsoleBlinkByServer] = useState<Record<string, boolean>>({});
-  const previousReadyByServerRef = useRef<Record<string, boolean | null>>({});
 
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
   const [selectedServer, setSelectedServer] = useState<GameServer | null>(null);
@@ -81,8 +78,8 @@ export function GameServersTable({
     action: 'start' | 'stop' | 'restart' | 'stopAll' | 'startAll' | 'delete';
   }>({ show: false, serverId: '', serverName: '', action: 'start' });
 
-  const [nameFilter, setNameFilter] = useState('');
-  const [gameFilter, setGameFilter] = useState('');
+  const [nameFilter] = useState('');
+  const [gameFilter] = useState('');
   const [statusFilter] = useState<'ALL' | GameServerStatus>('ALL');
 
   const [sortField, setSortField] = useState<SortField>(null);
@@ -92,6 +89,30 @@ export function GameServersTable({
     serverId: string;
     metric: MetricType;
   }>({ isOpen: false, serverId: '', metric: 'cpu' });
+
+  const VALID_METRICS: MetricType[] = ['cpu', 'memory', 'disk', 'network'];
+  const [visibleMetrics, setVisibleMetrics] = useState<MetricType[]>(() => {
+    try {
+      const stored = localStorage.getItem('gp_visible_metrics');
+      if (stored) {
+        const parsed = JSON.parse(stored) as unknown[];
+        const valid = parsed.filter((m): m is MetricType => VALID_METRICS.includes(m as MetricType));
+        return valid.length > 0 ? valid : ['cpu', 'memory'];
+      }
+    } catch { /* ignore */ }
+    return ['cpu', 'memory'];
+  });
+
+  useEffect(() => {
+    localStorage.setItem('gp_visible_metrics', JSON.stringify(visibleMetrics));
+  }, [visibleMetrics]);
+
+  const toggleMetric = (metric: MetricType) => {
+    setVisibleMetrics((prev) => {
+      if (prev.includes(metric) && prev.length === 1) return prev;
+      return prev.includes(metric) ? prev.filter((m) => m !== metric) : [...prev, metric];
+    });
+  };
   const [historyModal, setHistoryModal] = useState<{
     isOpen: boolean;
     serverId: string;
@@ -143,9 +164,32 @@ export function GameServersTable({
     }
   };
 
-  const getGameLabel = (gameKey: string) => {
-    return gameNamesByKey[gameKey] || gameKey;
-  };
+  // Precompute the human-readable game label once per server (parsing provider metadata
+  // at most once each) so the sort/filter comparators below are cheap O(1) lookups
+  // instead of re-running JSON.parse on every comparison during a sort.
+  const gameLabelById = useMemo(() => {
+    const map = new Map<GameServer['id'], string>();
+    servers.forEach((server) => {
+      // Prefer the human-readable game name carried in provider metadata
+      // (e.g. LinuxGSM exposes "gamename" while server.game is only the shortname).
+      let label = gameNamesByKey[server.game] || server.game;
+      if (server.providerMetadataJson) {
+        try {
+          const meta = JSON.parse(server.providerMetadataJson);
+          if (typeof meta?.gamename === 'string' && meta.gamename.trim()) {
+            label = meta.gamename;
+          }
+        } catch {
+          // Malformed metadata: keep the catalog/key fallback.
+        }
+      }
+      map.set(server.id, label);
+    });
+    return map;
+  }, [servers, gameNamesByKey]);
+
+  const getGameLabel = (server: GameServer) =>
+    gameLabelById.get(server.id) ?? (gameNamesByKey[server.game] || server.game);
 
   const openMetricModal = (server: GameServer, metric: MetricType) => {
     if (!isServerRunningStatus(server.status)) return;
@@ -259,64 +303,10 @@ export function GameServersTable({
     }, 2000);
   };
 
-  const renderMetricCell = (server: GameServer, metric: MetricType, value?: number) => {
-    const content = formatMetricValue(server.status, value);
-    if (!isServerRunningStatus(server.status)) {
-      return <span>{content}</span>;
-    }
-
-    return (
-      <AppButton
-        type="button"
-        tone="ghost"
-        onClick={() => openMetricModal(server, metric)}
-        className="inline-flex items-center rounded-md border-none bg-transparent px-2 py-1 -mx-2 text-inherit hover:bg-gray-700 hover:text-[var(--color-cyan-400)] transition-colors"
-        title={`Open ${metric === 'cpu' ? 'CPU' : 'Memory'} history`}
-      >
-        {content === 'Loading' ? (
-          <span className={textTertiary}>Loading</span>
-        ) : (
-          <span>{content}</span>
-        )}
-      </AppButton>
-    );
+  const changeMetricType = (type: MetricType) => {
+    setMetricModal((prev) => ({ ...prev, metric: type }));
   };
 
-  useEffect(() => {
-    const nextReadyByServer = terminalReadyByServer || {};
-    const previousReadyByServer = previousReadyByServerRef.current;
-    const timers: Array<ReturnType<typeof setTimeout>> = [];
-
-    Object.keys(nextReadyByServer).forEach((serverId) => {
-      const isReady = nextReadyByServer[serverId] === true;
-      const wasReady = previousReadyByServer[serverId] === true;
-
-      if (isReady && !wasReady) {
-        setConsoleBlinkByServer((prev) => ({
-          ...prev,
-          [serverId]: true,
-        }));
-
-        const timer = setTimeout(() => {
-          setConsoleBlinkByServer((prev) => ({
-            ...prev,
-            [serverId]: false,
-          }));
-        }, 1700);
-
-        timers.push(timer);
-      }
-    });
-
-    previousReadyByServerRef.current = {
-      ...previousReadyByServer,
-      ...nextReadyByServer,
-    };
-
-    return () => {
-      timers.forEach((timer) => clearTimeout(timer));
-    };
-  }, [terminalReadyByServer]);
 
   useEffect(() => {
     if (!historyModal.isOpen || !historyModal.serverId) return;
@@ -351,7 +341,7 @@ export function GameServersTable({
     if (gameFilter) {
       const filterValue = gameFilter.toLowerCase();
       result = result.filter((server) => {
-        const label = getGameLabel(server.game).toLowerCase();
+        const label = getGameLabel(server).toLowerCase();
         return label.includes(filterValue) || server.game.toLowerCase().includes(filterValue);
       });
     }
@@ -366,8 +356,8 @@ export function GameServersTable({
         let bValue = b[sortField];
 
         if (sortField === 'game') {
-          aValue = getGameLabel(a.game);
-          bValue = getGameLabel(b.game);
+          aValue = getGameLabel(a);
+          bValue = getGameLabel(b);
         }
 
         if (typeof aValue === 'string' && typeof bValue === 'string') {
@@ -420,51 +410,84 @@ export function GameServersTable({
   }, [historyByServer, selectedHistoryServer]);
 
   const metricModalAllData = useMemo(() => {
-    if (!selectedMetricServer) return [];
+    if (!selectedMetricServer || metricModal.metric === 'network') return [];
 
     const source = metricsHistoryByServer?.[selectedMetricServer.id] ?? [];
     const next = [...source];
 
-    const latestCpu = Number.isFinite(selectedMetricServer.cpuUsage)
-      ? selectedMetricServer.cpuUsage
-      : null;
-    const latestMemory = Number.isFinite(selectedMetricServer.memoryUsage)
-      ? selectedMetricServer.memoryUsage
-      : null;
-    const hasLiveMetric = metricModal.metric === 'cpu' ? latestCpu !== null : latestMemory !== null;
+    const latestValue =
+      metricModal.metric === 'cpu'
+        ? selectedMetricServer.cpuUsage
+        : metricModal.metric === 'memory'
+          ? selectedMetricServer.memoryUsage
+          : selectedMetricServer.diskUsage;
 
-    if (hasLiveMetric) {
+    // Disk is cached between 2-min polls — don't inject a synthetic live point for it
+    if (metricModal.metric !== 'disk' && Number.isFinite(latestValue)) {
       const last = next[next.length - 1];
       const now = Date.now();
       if (!last || now - last.timestamp > 15000) {
         next.push({
           timestamp: now,
-          cpuUsage: latestCpu ?? 0,
-          memoryUsage: latestMemory ?? 0,
+          cpuUsage: selectedMetricServer.cpuUsage ?? 0,
+          memoryUsage: selectedMetricServer.memoryUsage ?? 0,
+          diskUsage: selectedMetricServer.diskUsage ?? 0,
+          networkIn: selectedMetricServer.networkIn ?? 0,
+          networkOut: selectedMetricServer.networkOut ?? 0,
         });
       }
     }
 
-    return next.map((point) => {
-      const date = new Date(point.timestamp);
-      return {
-        timestamp: point.timestamp,
-        time: date.toLocaleString('en-US', {
-          month: 'short',
-          day: '2-digit',
-          hour: '2-digit',
-          minute: '2-digit',
-          hour12: false,
-        }),
-        value: metricModal.metric === 'cpu' ? point.cpuUsage : point.memoryUsage,
-      };
-    });
+    return next.map((point) => ({
+      timestamp: point.timestamp,
+      value:
+        metricModal.metric === 'cpu'
+          ? point.cpuUsage
+          : metricModal.metric === 'memory'
+            ? point.memoryUsage
+            : point.diskUsage,
+    }));
   }, [metricsHistoryByServer, metricModal.metric, selectedMetricServer]);
+
+  const metricNetworkAllData = useMemo(() => {
+    if (!selectedMetricServer || metricModal.metric !== 'network') return [];
+
+    const source = metricsHistoryByServer?.[selectedMetricServer.id] ?? [];
+    const next = [...source];
+
+    if (Number.isFinite(selectedMetricServer.networkIn)) {
+      const last = next[next.length - 1];
+      const now = Date.now();
+      if (!last || now - last.timestamp > 15000) {
+        next.push({
+          timestamp: now,
+          cpuUsage: selectedMetricServer.cpuUsage ?? 0,
+          memoryUsage: selectedMetricServer.memoryUsage ?? 0,
+          diskUsage: selectedMetricServer.diskUsage ?? 0,
+          networkIn: selectedMetricServer.networkIn ?? 0,
+          networkOut: selectedMetricServer.networkOut ?? 0,
+        });
+      }
+    }
+
+    return next.map((point) => ({
+      timestamp: point.timestamp,
+      networkIn: point.networkIn,
+      networkOut: point.networkOut,
+    }));
+  }, [metricsHistoryByServer, metricModal.metric, selectedMetricServer]);
+
   const deferredMetricModalAllData = useDeferredValue(metricModalAllData);
+  const deferredMetricNetworkAllData = useDeferredValue(metricNetworkAllData);
 
   const metricModalChartData = useMemo(
     () => getMetricZoomedData(deferredMetricModalAllData, metricZoom, metricOffset),
     [deferredMetricModalAllData, metricZoom, metricOffset]
+  );
+
+  const metricNetworkChartData = useMemo(
+    () => getMetricZoomedData(deferredMetricNetworkAllData, metricZoom, metricOffset),
+    [deferredMetricNetworkAllData, metricZoom, metricOffset]
   );
 
   const handleMetricMouseDown = (e: React.MouseEvent) => {
@@ -498,23 +521,42 @@ export function GameServersTable({
     setMetricZoom((currentZoom) => Math.max(10, Math.min(100, currentZoom + zoomDelta)));
   };
 
-  const cardBg = 'bg-[#111827]';
+  const cardBg = 'bg-gp-surface-card';
   const cardBorder = 'border-gray-800';
-  const cardShadow = '';
+  const cardShadow = 'shadow-[0_4px_24px_rgba(2,6,23,0.55),0_1px_4px_rgba(2,6,23,0.3)]';
   const textPrimary = 'text-white';
   const textSecondary = 'text-gray-300';
   const textTertiary = 'text-gray-400';
-  const inputBg = 'bg-[#1f2937]';
+  const inputBg = 'bg-gp-surface-elevated';
   const inputBorder = 'border-gray-700';
   const borderColor = 'border-gray-700';
   const rowBorder = 'border-gray-800';
-  const metricChartColor = metricModal.metric === 'cpu' ? ODS_CHART_THEME.cpu : ODS_CHART_THEME.ram;
-  const metricLabel = metricModal.metric === 'cpu' ? 'CPU' : 'Memory';
+  const metricChartColor =
+    metricModal.metric === 'cpu'
+      ? ODS_CHART_THEME.cpu
+      : metricModal.metric === 'memory'
+        ? ODS_CHART_THEME.ram
+        : ODS_CHART_THEME.disk;
+  const metricLabel =
+    metricModal.metric === 'cpu'
+      ? 'CPU'
+      : metricModal.metric === 'memory'
+        ? 'Memory'
+        : metricModal.metric === 'disk'
+          ? 'Disk'
+          : 'Network';
   const canOpenInstallModal = Boolean(onOpenInstallModal) && canInstall;
+
+  // Mount the (lazy, recharts-bearing) dialogs only once a dialog is first opened, then
+  // keep them mounted so close transitions still play. Guarded so it flips at most once.
+  const anyDialogOpen =
+    metricModal.isOpen || historyModal.isOpen || Boolean(selectedConnectionServer);
+  const [dialogsMounted, setDialogsMounted] = useState(false);
+  if (anyDialogOpen && !dialogsMounted) setDialogsMounted(true);
 
   return (
     <div
-      className={`${cardBg} rounded-lg border ${cardBorder} ${cardShadow} mb-6 px-3 pt-3 pb-0 md:px-6 md:pt-6 md:pb-0`}
+      className={`${cardBg} rounded-lg border ${cardBorder} ${cardShadow} mb-6 px-3 pt-3 pb-3 md:px-6 md:pt-6 lg:pb-0`}
     >
       <div className="mb-3 md:mb-4">
         <h2 className={`text-lg md:text-xl ${textPrimary}`}>Game Servers</h2>
@@ -522,8 +564,6 @@ export function GameServersTable({
 
       <GameServersDesktopTable
         filteredAndSortedServers={filteredAndSortedServers}
-        terminalReadyByServer={terminalReadyByServer}
-        consoleBlinkByServer={consoleBlinkByServer}
         currentUser={currentUser}
         permissionsByServer={permissionsByServer}
         borderColor={borderColor}
@@ -542,13 +582,14 @@ export function GameServersTable({
         getGameLabel={getGameLabel}
         openConnectionModal={openConnectionModal}
         openHistoryModal={openHistoryModal}
-        renderMetricCell={renderMetricCell}
+        openMetricModal={openMetricModal}
+        visibleMetrics={visibleMetrics}
+        onToggleMetric={toggleMetric}
         copyConnectionAddress={copyConnectionAddress}
         getConnectionCopyState={getConnectionCopyState}
         setConfirmAction={setConfirmAction}
         handleOpenSettings={handleOpenSettings}
         onAction={onAction}
-        onOpenConsoleTerminal={onOpenConsoleTerminal}
         canOpenInstallModal={canOpenInstallModal}
         canInstall={canInstall}
         onOpenInstallModal={onOpenInstallModal}
@@ -560,8 +601,6 @@ export function GameServersTable({
 
       <GameServersMobileList
         filteredAndSortedServers={filteredAndSortedServers}
-        terminalReadyByServer={terminalReadyByServer}
-        consoleBlinkByServer={consoleBlinkByServer}
         currentUser={currentUser}
         permissionsByServer={permissionsByServer}
         rowBorder={rowBorder}
@@ -585,12 +624,13 @@ export function GameServersTable({
         }
         handleOpenSettings={handleOpenSettings}
         onAction={onAction}
-        onOpenConsoleTerminal={onOpenConsoleTerminal}
         canOpenInstallModal={canOpenInstallModal}
         canInstall={canInstall}
         onOpenInstallModal={onOpenInstallModal}
       />
 
+      {dialogsMounted && (
+      <Suspense fallback={null}>
       <GameServersTableDialogs
         cardBg={cardBg}
         cardBorder={cardBorder}
@@ -606,8 +646,11 @@ export function GameServersTable({
         getConnectionCopyState={getConnectionCopyState}
         metricModalOpen={metricModal.isOpen}
         selectedMetricServer={selectedMetricServer}
+        metricType={metricModal.metric}
+        onChangeMetricType={changeMetricType}
         metricLabel={metricLabel}
         metricModalChartData={metricModalChartData}
+        metricNetworkChartData={metricNetworkChartData}
         metricChartColor={metricChartColor}
         metricDragging={metricDragging}
         closeMetricModal={closeMetricModal}
@@ -621,16 +664,18 @@ export function GameServersTable({
         historyModalEntries={historyModalEntries}
         closeHistoryModal={closeHistoryModal}
       />
+      </Suspense>
+      )}
 
       <ServerSettingsModal
         isOpen={settingsModalOpen}
         onClose={handleCloseSettings}
         serverName={liveSelectedServer?.name || ''}
         serverGame={liveSelectedServer?.game || ''}
+        serverProvider={liveSelectedServer?.provider}
+        serverProviderMetadataJson={liveSelectedServer?.providerMetadataJson}
         serverStatus={liveSelectedServer?.status || null}
         serverId={liveSelectedServer ? Number(liveSelectedServer.id) : null}
-        serverSftpUsername={liveSelectedServer?.sftpUsername || ''}
-        serverSftpEnabled={liveSelectedServer?.sftpEnabled === true}
         currentUser={currentUser}
         serverPermissions={liveSelectedServer ? permissionsByServer?.[liveSelectedServer.id] || [] : []}
       />
@@ -674,12 +719,12 @@ export function GameServersTable({
             : confirmAction.action === 'stopAll'
               ? `Are you sure you want to stop all ${servers.length} server(s)? All connected players will be disconnected.`
               : confirmAction.action === 'restart'
-                ? `Are you sure you want to restart "${confirmAction.serverName}"? The server will be temporarily unavailable.`
+                ? `Do you want to restart this server? The server will be temporarily unavailable.`
                 : confirmAction.action === 'stop'
-                  ? `Are you sure you want to stop "${confirmAction.serverName}"? All connected players will be disconnected.`
+                  ? `Do you want to stop this server? All connected players will be disconnected.`
                   : confirmAction.action === 'delete'
                     ? `Delete "${confirmAction.serverName}" now? This action is immediate and cannot be undone.`
-                    : `Are you sure you want to start "${confirmAction.serverName}"?`
+                    : `Do you want to start this server?`
         }
         confirmText={
           confirmAction.action === 'start' || confirmAction.action === 'startAll'
@@ -699,6 +744,7 @@ export function GameServersTable({
                 ? 'bg-red-600 hover:bg-red-700'
                 : 'bg-red-600 hover:bg-red-700'
         }
+        requiredText={confirmAction.action === 'delete' ? confirmAction.serverName : undefined}
       />
     </div>
   );

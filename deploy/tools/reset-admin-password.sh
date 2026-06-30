@@ -26,6 +26,7 @@ parse_args() {
 escape_env_value() {
   local value="$1"
   value="${value//\\/\\\\}"
+  value="${value//\$/\$\$}"
   value="${value//\"/\\\"}"
   printf '"%s"' "$value"
 }

@@ -1,108 +1,41 @@
 import WebSocket from 'ws';
-import type { AuthenticatedWebSocket, SubscriptionsState, SubscriptionChannel, WSMessage } from './types.js';
+import type {
+    AuthenticatedWebSocket,
+    SubscriptionsState,
+    SubscriptionChannel,
+    WsSubscribeActionsMessage,
+    WsSubscribeFileTransfersMessage,
+    WsSubscribeLogsMessage,
+    WsSubscribeMetricsMessage,
+    WsSubscribeServersMessage,
+    WsSubscribeSystemMetricsMessage,
+} from './types.js';
 import { sendSafe } from './auth.js';
 import {
     serverRepository,
     actionsRepository,
     installProgressRepository,
+    installInteractionRepository,
+    fileTransferJobRepository,
     serverMetricsRepository,
     systemMetricsRepository,
 } from '../database/index.js';
+import { serializeFileTransferJob } from '../database/repositories/fileTransferJobRepository.js';
 import * as dockerUtils from '../utils/docker.js';
-import type { WebSocketServer } from 'ws';
-import { subscribeConsoleStatus, unsubscribeConsoleStatus } from './pollers/consoleStatusPoller.js';
 import { logError } from '../utils/logger.js';
-import { nowIso, toIsoTimestamp } from '../utils/time.js';
+import { buildServerEnvVisibility } from '../middleware/auth.js';
+import { nowIso } from '../utils/time.js';
 import type { InstallationProgressRow, ServerActionRow } from '../types/database.js';
 import type { GameServerRow } from '../types/gameServer.js';
-
-export const round2 = (n: number) => (Number.isFinite(n) ? Math.round(n * 100) / 100 : 0);
-
-type MetricRow = Record<string, any> & {
-    timestamp?: string;
-    ts?: number;
-};
-
-function parseLimit(raw: unknown, fallback = 100, max = 2000): number {
-    const n = Number.parseInt(String(raw ?? ''), 10);
-    if (!Number.isFinite(n) || n <= 0) return fallback;
-    return Math.min(n, max);
-}
-
-function parseSqliteTimestampToMs(ts: string): number {
-    // SQLite CURRENT_TIMESTAMP = "YYYY-MM-DD HH:MM:SS"
-    // Convert to ISO by replacing space with 'T' and assuming UTC.
-    // (SQLite CURRENT_TIMESTAMP is UTC.)
-    const iso = ts.includes('T') ? ts : ts.replace(' ', 'T') + 'Z';
-    const ms = Date.parse(iso);
-    return Number.isFinite(ms) ? ms : 0;
-}
-
-function bucketSizeMsForAge(ageMs: number): number {
-    const H = 60 * 60_000;
-    if (ageMs <= 1 * H) return 10_000;      // 0–1h: 10s
-    if (ageMs <= 6 * H) return 30_000;      // 1–6h: 30s
-    return 120_000;                          // 6–24h: 2min
-}
-
-function downsampleMetrics<T extends MetricRow>(
-    rowsChronological: T[],
-    nowMs: number,
-    numericKeys: string[],
-): T[] {
-    const buckets = new Map<number, {
-        row: any;
-        count: number;
-        sums: Record<string, number>;
-        firstMs: number;
-    }>();
-
-    for (const r of rowsChronological) {
-        const tMs = typeof r.ts === 'number' ? r.ts : (r.timestamp ? parseSqliteTimestampToMs(r.timestamp) : 0);
-        if (!tMs) continue;
-
-        const ageMs = nowMs - tMs;
-        if (ageMs < 0 || ageMs > 24 * 60 * 60_000) continue;
-
-        const bucketMs = bucketSizeMsForAge(ageMs);
-        const bucketStart = Math.floor(tMs / bucketMs) * bucketMs;
-
-        let b = buckets.get(bucketStart);
-        if (!b) {
-            const base: any = { ...r };
-            base.timestamp = new Date(bucketStart).toISOString();
-            base.ts = bucketStart;
-
-            b = {
-                row: base,
-                count: 0,
-                sums: Object.fromEntries(numericKeys.map((k) => [k, 0])),
-                firstMs: bucketStart,
-            };
-            buckets.set(bucketStart, b);
-        }
-
-        b.count += 1;
-        for (const k of numericKeys) {
-            const v = Number((r as any)[k]);
-            if (Number.isFinite(v)) b.sums[k] += v;
-        }
-    }
-
-    const sorted = Array.from(buckets.entries())
-        .sort((a, b) => a[0] - b[0])
-        .map(([, b]) => {
-            const out = { ...b.row };
-            for (const k of numericKeys) {
-                out[k] = round2(b.count > 0 ? b.sums[k] / b.count : out[k]);
-            }
-            delete (out as any).ts;
-
-            return out as T;
-        });
-
-    return sorted;
-}
+import { getInstallStepsForServer } from '../services/installPlan.js';
+import {
+    redactServerEnv,
+    serializeGameServerWithInstallProgress,
+    serializeInstallationInteraction,
+    serializeInstallationProgress,
+    serializeServerAction,
+} from '../utils/apiSerialization.js';
+import { downsampleMetrics, parseLimit, serializeMetricPoint } from './metricsSerialization.js';
 
 export function ensureSubs(ws: AuthenticatedWebSocket): SubscriptionsState {
     ws.subs ??= {
@@ -111,7 +44,7 @@ export function ensureSubs(ws: AuthenticatedWebSocket): SubscriptionsState {
         metrics: new Set<number>(),
         install: new Set<number>(),
         status: new Set<number>(),
-        consoleStatus: new Set<number>(),
+        fileTransfers: new Set<number>(),
         systemMetrics: false,
         servers: false,
     };
@@ -132,24 +65,13 @@ export function cleanupClient(ws: AuthenticatedWebSocket): void {
         ws.logStreams = {};
     }
 
-    // Unsubscribe from console status to release poller references.
-    if (ws.subs?.consoleStatus) {
-        for (const serverId of ws.subs.consoleStatus.values()) {
-            try {
-                unsubscribeConsoleStatus(ws, serverId);
-            } catch {
-                // Ignore cleanup errors.
-            }
-        }
-        ws.subs.consoleStatus.clear();
-    }
-
     // Clear remaining subscription state.
     ws.subs?.logs.clear();
     ws.subs?.actions.clear();
     ws.subs?.metrics.clear();
     ws.subs?.install.clear();
     ws.subs?.status.clear();
+    ws.subs?.fileTransfers.clear();
 
     if (ws.subs) {
         ws.subs.systemMetrics = false;
@@ -157,7 +79,7 @@ export function cleanupClient(ws: AuthenticatedWebSocket): void {
     }
 }
 
-async function assertServerAccess(ws: AuthenticatedWebSocket, serverId: number) {
+async function assertServerAccess(_ws: AuthenticatedWebSocket, serverId: number) {
     const server = await serverRepository.findById(serverId);
     if (!server) return null;
     return server;
@@ -165,7 +87,7 @@ async function assertServerAccess(ws: AuthenticatedWebSocket, serverId: number) 
 
 export async function handleSubscribeServers(
     ws: AuthenticatedWebSocket,
-    _message?: WSMessage
+    _message?: WsSubscribeServersMessage
 ): Promise<void> {
     const subs = ensureSubs(ws);
     subs.servers = true;
@@ -174,15 +96,18 @@ export async function handleSubscribeServers(
 
     try {
         const servers = await serverRepository.listAll();
+        const canSeeEnv = await buildServerEnvVisibility(ws);
 
         const serversWithInstall = await Promise.all(
             servers.map(async (server: GameServerRow) => {
                 const installProgress = await installProgressRepository.getByServerId(server.id);
 
-                return {
-                    ...server,
-                    install_progress: installProgress as InstallationProgressRow | undefined,
-                };
+                const serialized = serializeGameServerWithInstallProgress(
+                    server,
+                    installProgress as InstallationProgressRow | undefined
+                );
+
+                return canSeeEnv(server.id) ? serialized : redactServerEnv(serialized);
             })
         );
 
@@ -196,7 +121,7 @@ export async function handleSubscribeServers(
 export async function handleSubscribeLogs(
     ws: AuthenticatedWebSocket,
     serverId: number,
-    message?: WSMessage
+    message?: WsSubscribeLogsMessage
 ): Promise<void> {
     const server = await assertServerAccess(ws, serverId);
     if (!server) {
@@ -207,7 +132,7 @@ export async function handleSubscribeLogs(
     const subs = ensureSubs(ws);
     subs.logs.add(serverId);
 
-    const limit = parseLimit((message as any)?.data?.limit, 200, 1000);
+    const limit = parseLimit(message?.data?.limit, 200, 1000);
 
     if (server.docker_container_id) {
         const containerLogs = await dockerUtils.getContainerLogs(server.docker_container_id, limit);
@@ -240,7 +165,7 @@ export async function handleSubscribeLogs(
 export async function handleSubscribeActions(
     ws: AuthenticatedWebSocket,
     serverId: number,
-    message?: WSMessage
+    message?: WsSubscribeActionsMessage
 ): Promise<void> {
     const server = await assertServerAccess(ws, serverId);
     if (!server) {
@@ -251,21 +176,12 @@ export async function handleSubscribeActions(
     const subs = ensureSubs(ws);
     subs.actions.add(serverId);
 
-    const limit = parseLimit((message as any)?.data?.limit, 200, 2000);
+    const limit = parseLimit(message?.data?.limit, 200, 2000);
 
     try {
         const rows = await actionsRepository.getRecent(serverId, limit);
 
-        const actions = rows
-            .reverse()
-            .map((row: ServerActionRow) => ({
-                id: row.id,
-                server_id: row.server_id,
-                level: row.level,
-                message: row.message,
-                actor_username: row.actor_username ?? null,
-                timestamp: toIsoTimestamp(row.timestamp),
-            }));
+        const actions = rows.reverse().map((row: ServerActionRow) => serializeServerAction(row));
 
         sendSafe(ws, {
             type: 'actions:history',
@@ -282,24 +198,6 @@ export async function handleSubscribeActions(
     sendSafe(ws, { type: 'actions:subscribed', serverId, timestamp: nowIso() });
 }
 
-export async function handleSubscribeConsoleStatus(
-    wss: WebSocketServer,
-    ws: AuthenticatedWebSocket,
-    serverId: number
-): Promise<void> {
-    const server = await assertServerAccess(ws, serverId);
-    if (!server) { sendSafe(ws, { type: 'error', error: 'Access denied' }); return; }
-
-
-    const subs = ensureSubs(ws);
-    subs.consoleStatus.add(serverId);
-
-    subscribeConsoleStatus(wss, ws, serverId);
-
-    // ack (useful for front state)
-    sendSafe(ws, { type: 'console-status:subscribed', serverId, timestamp: nowIso() });
-}
-
 export async function handleSubscribeInstall(ws: AuthenticatedWebSocket, serverId: number): Promise<void> {
     const server = await assertServerAccess(ws, serverId);
     if (!server) {
@@ -311,16 +209,64 @@ export async function handleSubscribeInstall(ws: AuthenticatedWebSocket, serverI
     subs.install.add(serverId);
 
     const progress = await installProgressRepository.getByServerId(serverId);
+    const interaction = await installInteractionRepository.getActiveByServerId(serverId);
+
     sendSafe(ws, {
-        type: 'install:progress',
+        type: 'install:plan',
         serverId,
-        progress: progress?.progress_percent ?? 0,
-        status: progress?.status ?? 'pending',
-        errorMessage: progress?.error_message ?? null,
+        steps: getInstallStepsForServer(server),
         timestamp: nowIso(),
     });
 
+    const serializedProgress = serializeInstallationProgress(progress);
+
+    sendSafe(ws, {
+        type: 'install:progress',
+        serverId,
+        progress: serializedProgress?.progress ?? 0,
+        status: serializedProgress?.status ?? 'pending',
+        errorMessage: serializedProgress?.errorMessage ?? null,
+        timestamp: nowIso(),
+    });
+
+    if (interaction) {
+        const serializedInteraction = serializeInstallationInteraction(interaction);
+
+        sendSafe(ws, {
+            type: 'install:interaction',
+            ...serializedInteraction,
+            timestamp: nowIso(),
+        });
+    }
+
     sendSafe(ws, { type: 'install:subscribed', serverId, timestamp: nowIso() });
+}
+
+export async function handleSubscribeFileTransfers(
+    ws: AuthenticatedWebSocket,
+    serverId: number,
+    message?: WsSubscribeFileTransfersMessage
+): Promise<void> {
+    const server = await assertServerAccess(ws, serverId);
+    if (!server) {
+        sendSafe(ws, { type: 'error', error: 'Access denied' });
+        return;
+    }
+
+    const subs = ensureSubs(ws);
+    subs.fileTransfers.add(serverId);
+
+    const limit = parseLimit(message?.data?.limit, 20, 100);
+    const jobs = await fileTransferJobRepository.listRecentForServer(serverId, limit);
+
+    sendSafe(ws, {
+        type: 'file-transfer:snapshot',
+        serverId,
+        jobs: jobs.map(serializeFileTransferJob),
+        limit,
+        timestamp: nowIso(),
+    });
+    sendSafe(ws, { type: 'file-transfer:subscribed', serverId, timestamp: nowIso() });
 }
 
 export async function handleUnsubscribe(
@@ -362,30 +308,18 @@ export async function handleUnsubscribe(
         return;
     }
 
-    if (channel === 'console-status') {
-        subs.consoleStatus.delete(serverId);
-        unsubscribeConsoleStatus(ws, serverId);
-        sendSafe(ws, { type: 'unsubscribed', channel: 'console-status', serverId });
-        return;
-    }
-
     if (channel === 'install') subs.install.delete(serverId);
+    if (channel === 'file-transfers') subs.fileTransfers.delete(serverId);
     if (channel === 'metrics') subs.metrics.delete(serverId);
     if (channel === 'status') subs.status.delete(serverId);
 
     sendSafe(ws, { type: 'unsubscribed', channel, serverId });
 }
 
-/**
- * Server metrics subscription:
- * - adds the serverId to the subscription set
- * - sends DB history immediately
- * - realtime updates are pushed by the global server metrics poller
- */
 export async function handleSubscribeMetrics(
     ws: AuthenticatedWebSocket,
     serverId: number,
-    message?: WSMessage
+    message?: WsSubscribeMetricsMessage
 ): Promise<void> {
     const server = await assertServerAccess(ws, serverId);
     if (!server) {
@@ -396,7 +330,7 @@ export async function handleSubscribeMetrics(
     const subs = ensureSubs(ws);
     subs.metrics.add(serverId);
 
-    const historyLimit = parseLimit((message as any)?.data?.limit, 100, 2000);
+    const historyLimit = parseLimit(message?.data?.limit, 100, 2000);
 
     try {
         const rawLimit = 10_000;
@@ -405,11 +339,18 @@ export async function handleSubscribeMetrics(
         const chronological = raw.reverse(); // oldest -> newest
 
         const nowMs = Date.now();
-        const downsampled = downsampleMetrics(chronological, nowMs, ['cpu_usage', 'memory_usage']);
+        const downsampled = downsampleMetrics(chronological, nowMs, [
+            'cpu_usage',
+            'memory_usage',
+            'disk_usage',
+            'network_in',
+            'network_out',
+        ]);
 
         // Apply final limit from the newest side (keep the most recent N points)
-        const final =
+        const finalRows =
             downsampled.length > historyLimit ? downsampled.slice(downsampled.length - historyLimit) : downsampled;
+        const final = finalRows.map(serializeMetricPoint);
 
         sendSafe(ws, {
             type: 'metrics:history',
@@ -432,11 +373,14 @@ export async function handleSubscribeMetrics(
     sendSafe(ws, { type: 'metrics:subscribed', serverId, timestamp: nowIso() });
 }
 
-export async function handleSubscribeSystemMetrics(ws: AuthenticatedWebSocket, message?: WSMessage): Promise<void> {
+export async function handleSubscribeSystemMetrics(
+    ws: AuthenticatedWebSocket,
+    message?: WsSubscribeSystemMetricsMessage
+): Promise<void> {
     const subs = ensureSubs(ws);
     subs.systemMetrics = true;
 
-    const historyLimit = parseLimit((message as any)?.data?.limit, 200, 2000);
+    const historyLimit = parseLimit(message?.data?.limit, 200, 2000);
 
     try {
         const rawLimit = 10_000;
@@ -453,8 +397,9 @@ export async function handleSubscribeSystemMetrics(ws: AuthenticatedWebSocket, m
             'network_out',
         ]);
 
-        const final =
+        const finalRows =
             downsampled.length > historyLimit ? downsampled.slice(downsampled.length - historyLimit) : downsampled;
+        const final = finalRows.map(serializeMetricPoint);
 
         sendSafe(ws, {
             type: 'system-metrics:history',

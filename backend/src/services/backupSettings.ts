@@ -1,16 +1,18 @@
 import { execShellCommand } from '../utils/docker.js';
 import { getServerOrThrow } from '../services/servers.js';
+import { getLinuxGsmMetadata } from '../providers/serverMetadata.js';
 
 type BackupSettings = {
-    maxbackups: number;
-    maxbackupdays: number;
-    stoponbackup: boolean;
+    maxBackups: number;
+    maxBackupDays: number;
+    stopOnBackup: boolean;
 };
 
 export async function getBackupSettings(
     serverId: number,
 ): Promise<BackupSettings> {
     const server = await getServerOrThrow(serverId);
+    getLinuxGsmMetadata(server);
     const containerId = server.docker_container_id;
 
     const cmd = `
@@ -64,7 +66,7 @@ printf '{"maxbackups":"%s","maxbackupdays":"%s","stoponbackup":"%s"}' \
         throw new Error(`Failed to read backup settings: ${stderr || stdout}`);
     }
 
-    let raw: any;
+    let raw: { error?: unknown; maxbackups?: unknown; maxbackupdays?: unknown; stoponbackup?: unknown };
     try {
         raw = JSON.parse(stdout.trim());
     } catch {
@@ -84,9 +86,9 @@ printf '{"maxbackups":"%s","maxbackupdays":"%s","stoponbackup":"%s"}' \
     };
 
     return {
-        maxbackups: parseIntFromCfg(raw.maxbackups),
-        maxbackupdays: parseIntFromCfg(raw.maxbackupdays),
-        stoponbackup: parseStopOnBackup(raw.stoponbackup),
+        maxBackups: parseIntFromCfg(raw.maxbackups),
+        maxBackupDays: parseIntFromCfg(raw.maxbackupdays),
+        stopOnBackup: parseStopOnBackup(raw.stoponbackup),
     };
 }
 
@@ -95,31 +97,28 @@ export async function setBackupSettings(
     patch: Partial<BackupSettings>
 ): Promise<void> {
     const server = await getServerOrThrow(serverId);
+    getLinuxGsmMetadata(server);
     const containerId = server.docker_container_id;
 
-    // Validation
-    if (patch.maxbackups != null && (!Number.isInteger(patch.maxbackups) || patch.maxbackups < 0)) {
-        throw Object.assign(new Error('maxbackups must be a non-negative integer'), { statusCode: 400 });
+    if (patch.maxBackups != null && (!Number.isInteger(patch.maxBackups) || patch.maxBackups < 0)) {
+        throw Object.assign(new Error('maxBackups must be a non-negative integer'), { statusCode: 400 });
     }
-    if (patch.maxbackupdays != null && (!Number.isInteger(patch.maxbackupdays) || patch.maxbackupdays < 0)) {
-        throw Object.assign(new Error('maxbackupdays must be a non-negative integer'), { statusCode: 400 });
+    if (patch.maxBackupDays != null && (!Number.isInteger(patch.maxBackupDays) || patch.maxBackupDays < 0)) {
+        throw Object.assign(new Error('maxBackupDays must be a non-negative integer'), { statusCode: 400 });
     }
-    if (patch.stoponbackup != null && typeof patch.stoponbackup !== 'boolean') {
-        throw Object.assign(new Error('stoponbackup must be a boolean'), { statusCode: 400 });
+    if (patch.stopOnBackup != null && typeof patch.stopOnBackup !== 'boolean') {
+        throw Object.assign(new Error('stopOnBackup must be a boolean'), { statusCode: 400 });
     }
 
     const hasAny =
-        patch.maxbackups != null || patch.maxbackupdays != null || patch.stoponbackup != null;
+        patch.maxBackups != null || patch.maxBackupDays != null || patch.stopOnBackup != null;
 
     if (!hasAny) return;
 
-    // Route handlers must normalize types before calling this service.
-    // For example, convert string numerics (e.g. "2") to numbers in the route layer.
-
     const assignments: string[] = [];
-    if (patch.maxbackups != null) assignments.push(`apply maxbackups "${patch.maxbackups}"`);
-    if (patch.maxbackupdays != null) assignments.push(`apply maxbackupdays "${patch.maxbackupdays}"`);
-    if (patch.stoponbackup != null) assignments.push(`apply stoponbackup "${patch.stoponbackup ? 'on' : 'off'}"`);
+    if (patch.maxBackups != null) assignments.push(`apply maxbackups "${patch.maxBackups}"`);
+    if (patch.maxBackupDays != null) assignments.push(`apply maxbackupdays "${patch.maxBackupDays}"`);
+    if (patch.stopOnBackup != null) assignments.push(`apply stoponbackup "${patch.stopOnBackup ? 'on' : 'off'}"`);
 
     const cmd = `
 set -euo pipefail

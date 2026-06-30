@@ -1,13 +1,33 @@
 import { BaseRepository } from './base.js';
+import { nowIso } from '../../utils/time.js';
+
+export type ServerMemberWithUserRow = {
+  id: number;
+  server_id: number;
+  user_id: number;
+  permissions_json: string;
+  created_at: string;
+  updated_at: string;
+  username: string;
+};
+
+export type ServerMembershipRow = {
+  server_id: number;
+  permissions_json: string;
+  created_at: string;
+  updated_at: string;
+};
 
 export class ServerMemberRepository extends BaseRepository {
   async listByServer(serverId: number) {
     const db = await this.ensureDb();
-    return db.all(
+    return db.all<ServerMemberWithUserRow[]>(
       `SELECT sm.id,
               sm.server_id,
               sm.user_id,
               sm.permissions_json,
+              sm.created_at,
+              sm.updated_at,
               u.username
        FROM server_members sm
        JOIN users u ON u.id = sm.user_id
@@ -19,7 +39,7 @@ export class ServerMemberRepository extends BaseRepository {
 
   async listByUser(userId: number) {
     const db = await this.ensureDb();
-    return db.all(
+    return db.all<ServerMembershipRow[]>(
       `SELECT sm.server_id,
               sm.permissions_json,
               sm.created_at,
@@ -43,10 +63,11 @@ export class ServerMemberRepository extends BaseRepository {
 
   async create(serverId: number, userId: number, permissions: string[]) {
     const db = await this.ensureDb();
+    const timestamp = nowIso();
     await db.run(
-      `INSERT INTO server_members (server_id, user_id, permissions_json)
-       VALUES (?, ?, ?)`,
-      [serverId, userId, JSON.stringify(permissions)]
+      `INSERT INTO server_members (server_id, user_id, permissions_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?)`,
+      [serverId, userId, JSON.stringify(permissions), timestamp, timestamp]
     );
   }
 
@@ -54,9 +75,9 @@ export class ServerMemberRepository extends BaseRepository {
     const db = await this.ensureDb();
     await db.run(
       `UPDATE server_members
-       SET permissions_json = ?, updated_at = CURRENT_TIMESTAMP
+       SET permissions_json = ?, updated_at = ?
        WHERE server_id = ? AND user_id = ?`,
-      [JSON.stringify(permissions), serverId, userId]
+      [JSON.stringify(permissions), nowIso(), serverId, userId]
     );
   }
 

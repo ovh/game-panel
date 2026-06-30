@@ -25,6 +25,27 @@ export default defineConfig({
     sourcemap: false,
     minify: 'esbuild',
     chunkSizeWarningLimit: 1000,
+    rollupOptions: {
+      output: {
+        // Isolate the heavy optional vendors into their own chunks. Combined with the
+        // React.lazy boundaries (CodeEditor, ServerSshTerminal, HostStatus), these are
+        // fetched on demand and cached independently across deploys instead of bloating
+        // the single entry chunk.
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined;
+          if (id.includes('@codemirror') || id.includes('@uiw') || id.includes('@lezer')) {
+            return 'codemirror';
+          }
+          if (id.includes('@xterm')) return 'xterm';
+          if (id.includes('recharts') || id.includes('/d3-') || id.includes('victory-vendor')) {
+            return 'charts';
+          }
+          if (id.includes('@ovhcloud')) return 'ods';
+          if (id.includes('@dnd-kit')) return 'dndkit';
+          return undefined;
+        },
+      },
+    },
   },
   server: {
     port: 5173,

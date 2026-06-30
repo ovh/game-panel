@@ -1,24 +1,34 @@
-import type { NormalizedPortMappings } from '../utils/ports.js';
-import { installProgressRepository, actionsRepository } from '../database/index.js';
+import { installProgressRepository, actionsRepository, installInteractionRepository } from '../database/index.js';
 import * as dockerUtils from '../utils/docker.js';
 import { serverRepository } from '../database/index.js';
-import { getGameAdapter } from '../games/registry.js';
+import { getGameAdapter } from '../providers/linuxgsm/adapters/registry.js';
 import { bus } from '../realtime/bus.js';
-import { provisionSftpForServer } from '../services/sftpProvision.js';
-import type { NormalizedHealthcheck } from '../utils/docker/containers.js';
 import type { GameServerRow } from '../types/gameServer.js';
-import type { SteamCredentials } from '../games/types.js';
-import { deleteSftpUser } from '../services/sftpAccounts.js';
-import { regenerateSshdMatchFromDb } from '../routes/sftp.js';
-import { ensureServerDataDirs, removeServerDataDir } from '../utils/storage.js';
+import { ensureServerDataDirs, ensureServerMountDirs, removeServerDataDir } from '../utils/storage.js';
 import { logError } from '../utils/logger.js';
 import { nowIso } from '../utils/time.js';
-import { sendGameInstalledTelemetry, sendGameUninstalledTelemetry } from './telemetry.js';
 import {
     beginServerTransition,
     clearServerTransition,
+    completeServerTransition,
     INSTALL_TRANSITION_TIMEOUT_MS,
 } from './serverTransitions.js';
+import { sendGameInstalledTelemetry, sendGameUninstalledTelemetry } from './telemetry.js';
+import type { ResolvedInstallSpec } from '../providers/installTypes.js';
+import {
+    beforeOvhcloudServerDelete,
+    cleanupFailedOvhcloudInstallIfHandled,
+    getOvhcloudInstallRestartPolicy,
+    getServerStopTimeoutSeconds,
+    installOvhcloudServerIfHandled,
+} from './ovhcloudLifecycle.js';
+import { removeLinuxGsmContainerCronsBestEffort } from './linuxGsmCrons.js';
+import {
+    assertCanDeleteServer,
+    assertServerExistsDuringInstall,
+    serverExists,
+    ServerInstallCancelledError,
+} from './serverActionPolicy.js';
 
 type GameServerWithContainer = GameServerRow & {
     docker_container_id: string;
@@ -38,61 +48,136 @@ export async function getServerOrThrow(serverId: number): Promise<GameServerWith
     return server as GameServerWithContainer;
 }
 
+async function completeInstallStatus(params: {
+    serverId: number;
+    healthcheckDefined: boolean;
+}): Promise<void> {
+    if (params.healthcheckDefined) {
+        await beginServerTransition(params.serverId, 'installing', {
+            timeoutMs: INSTALL_TRANSITION_TIMEOUT_MS,
+            timeoutBehavior: 'reconcile',
+            pollDockerHealth: true,
+        });
+        return;
+    }
+
+    await completeServerTransition(params.serverId, 'running');
+}
+
 export async function installServerAsync(
     serverId: number,
-    gameKey: string,
-    gameServerName: string,
-    containerName: string,
-    mappings: NormalizedPortMappings,
-    opts: {
-        image: string;
-        healthcheck: NormalizedHealthcheck | null;
-        steamCredentials: SteamCredentials | null;
-    },
+    displayName: string,
+    spec: ResolvedInstallSpec,
     username?: string
 ): Promise<void> {
     try {
-        const adapter = getGameAdapter(gameKey);
-        const storage = await ensureServerDataDirs(serverId);
+        await assertServerExistsDuringInstall(serverId);
+        const containerName = dockerUtils.buildManagedContainerName(serverId, displayName);
 
-        await adapter.preInstall({
-            serverId,
-            gameKey,
-            gameServerName,
-            dataDir: storage.dataDir,
-            steamCredentials: opts.steamCredentials,
-        });
-
-        await installProgressRepository.update(serverId, 0, 'downloading');
-
-        await dockerUtils.pullImageByName(opts.image);
-        await installProgressRepository.update(serverId, 25, 'extracting');
-
-        const containerInfo = await dockerUtils.createContainer(
-            { gameKey, image: opts.image, healthcheck: opts.healthcheck },
+        const handledInstall = await installOvhcloudServerIfHandled({
             serverId,
             containerName,
-            mappings
-        );
-
-        await installProgressRepository.update(serverId, 75, 'installing');
-
-        await serverRepository.updateDockerInfo(serverId, containerInfo.id, containerInfo.name);
-        await beginServerTransition(serverId, 'installing', {
-            timeoutMs: INSTALL_TRANSITION_TIMEOUT_MS,
-            timeoutBehavior: 'set_stopped',
-            writeStatus: false,
-            pollDockerHealth: true,
+            spec,
+            username,
         });
-
-        try {
-            await provisionSftpForServer(serverId);
-        } catch (err) {
-            logError('SERVICE:SERVER_INSTALL:SFTP_PROVISION', err, { serverId });
+        if (handledInstall) {
+            return;
         }
 
-        await adapter.postInstall({ serverId, gameKey, containerId: containerInfo.id });
+        await assertServerExistsDuringInstall(serverId);
+        const storage = await ensureServerDataDirs(serverId);
 
+        if (spec.provider === 'linuxgsm') {
+            await assertServerExistsDuringInstall(serverId);
+            const gameServerName = String(spec.providerMetadata.gameservername ?? '');
+            const adapter = getGameAdapter(spec.catalogId ?? '');
+
+            await adapter.beforeContainerCreate({
+                serverId,
+                shortname: spec.catalogId ?? '',
+                gameServerName,
+                dataDir: storage.dataDir,
+                steamCredentials: spec.steamCredentials,
+            });
+        }
+
+        await assertServerExistsDuringInstall(serverId);
+        await installProgressRepository.update(serverId, 0, 'pulling_image');
+
+        await dockerUtils.pullImageByName(spec.dockerImage);
+        await assertServerExistsDuringInstall(serverId);
+        await installProgressRepository.update(serverId, 25, 'preparing_files');
+
+        const resolvedMounts = await ensureServerMountDirs(serverId, spec.mounts, {
+            uid: spec.runtimeIdentity.uid,
+            gid: spec.runtimeIdentity.gid,
+        });
+        await assertServerExistsDuringInstall(serverId);
+
+        await installProgressRepository.update(serverId, 50, 'creating_container');
+        const containerInfo = await dockerUtils.createContainer(
+            {
+                provider: spec.provider,
+                catalogId: spec.catalogId,
+                image: spec.dockerImage,
+                env: spec.env,
+                mounts: resolvedMounts,
+                ports: spec.ports,
+                healthcheck: spec.healthcheck,
+                resourceLimits: spec.resourceLimits,
+                restartPolicy: getOvhcloudInstallRestartPolicy(spec) ?? 'unless-stopped',
+                start: false,
+            },
+            serverId,
+            containerName
+        );
+
+        if (!(await serverExists(serverId))) {
+            await dockerUtils.removeContainer(containerInfo.id).catch(() => undefined);
+            throw new ServerInstallCancelledError(serverId);
+        }
+
+        await serverRepository.updateDockerInfo(serverId, containerInfo.id, containerInfo.name);
+        await installProgressRepository.update(serverId, 75, 'starting_container');
+        try {
+            await dockerUtils.startContainer(containerInfo.id);
+        } catch (error) {
+            if (!(await serverExists(serverId))) {
+                throw new ServerInstallCancelledError(serverId);
+            }
+            await dockerUtils.removeContainer(containerInfo.id).catch(() => undefined);
+            await serverRepository.update(serverId, {
+                docker_container_id: null,
+                docker_container_name: null,
+                container_status: 'missing',
+                health_status: 'none',
+            });
+            throw error;
+        }
+
+        await assertServerExistsDuringInstall(serverId);
+        const runtime = await dockerUtils.inspectContainerRuntime(containerInfo.id);
+        await serverRepository.updateRuntimeState(serverId, runtime);
+        if (spec.provider === 'linuxgsm') {
+            const freshServer = await serverRepository.findById(serverId);
+            if (freshServer) await removeLinuxGsmContainerCronsBestEffort(freshServer);
+        }
+        await completeInstallStatus({
+            serverId,
+            healthcheckDefined: containerInfo.healthcheckDefined,
+        });
+
+        if (spec.provider === 'linuxgsm') {
+            await assertServerExistsDuringInstall(serverId);
+            const adapter = getGameAdapter(spec.catalogId ?? '');
+            await adapter.afterContainerStart({
+                serverId,
+                shortname: spec.catalogId ?? '',
+                containerId: containerInfo.id,
+            });
+        }
+
+        await assertServerExistsDuringInstall(serverId);
         await installProgressRepository.update(serverId, 100, 'completed');
 
         await actionsRepository.create(
@@ -102,16 +187,29 @@ export async function installServerAsync(
             username || ""
         );
 
+        await assertServerExistsDuringInstall(serverId);
         sendGameInstalledTelemetry({
             serverId,
-            gameKey,
+            provider: spec.provider,
+            catalogId: spec.catalogId,
+            dockerImage: spec.provider === 'external' ? spec.dockerImage : null,
         });
     } catch (error) {
-        logError('SERVICE:SERVER_INSTALL', error, { serverId, gameKey });
+        if (error instanceof ServerInstallCancelledError || !(await serverExists(serverId))) {
+            clearServerTransition(serverId);
+            await installInteractionRepository.cancelActiveForServer(serverId).catch(() => undefined);
+            await dockerUtils.removeManagedContainersForServer(serverId).catch(() => undefined);
+            await removeServerDataDir(serverId).catch(() => undefined);
+            return;
+        }
+
+        logError('SERVICE:SERVER_INSTALL', error, { serverId, provider: spec.provider, catalogId: spec.catalogId });
         clearServerTransition(serverId);
-        await serverRepository.updateStatus(serverId, 'stopped');
+        await cleanupFailedOvhcloudInstallIfHandled(serverId, spec);
+        await installInteractionRepository.cancelActiveForServer(serverId).catch(() => undefined);
 
         const message = error instanceof Error ? error.message : 'Unknown error';
+        await serverRepository.markFailed(serverId, message);
         await installProgressRepository.update(serverId, 0, 'failed', message);
         await actionsRepository.create(serverId, 'error', `Installation failed: ${message}`, username || "");
     }
@@ -123,8 +221,19 @@ export async function deleteServerBestEffort(serverId: number): Promise<void> {
         throw Object.assign(new Error('Server not found'), { statusCode: 404 });
     }
 
-    // Remove Docker container (best effort)
+    assertCanDeleteServer(server);
+
     if (server.docker_container_id) {
+        if (server.provider === 'ovhcloud') {
+            const status = await dockerUtils.checkContainerStatus(server.docker_container_id).catch(() => 'missing');
+            if (status === 'running') {
+                await dockerUtils.stopContainer(server.docker_container_id, getServerStopTimeoutSeconds(server)).catch((err) => {
+                    logError('SERVICE:SERVER_DELETE:STOP', err, { serverId });
+                });
+            }
+            await beforeOvhcloudServerDelete(serverId, server);
+        }
+
         try {
             await dockerUtils.removeContainer(server.docker_container_id);
         } catch (err) {
@@ -132,34 +241,25 @@ export async function deleteServerBestEffort(serverId: number): Promise<void> {
         }
     }
 
-    // Remove server data directory (best effort)
+    try {
+        await dockerUtils.removeManagedContainersForServer(serverId);
+    } catch (err) {
+        logError('SERVICE:SERVER_DELETE:MANAGED_CONTAINERS', err, { serverId });
+    }
+
     try {
         await removeServerDataDir(serverId);
     } catch (err) {
         logError('SERVICE:SERVER_DELETE:DATA_DIR', err, { serverId });
     }
 
-    // Remove SFTP user (best effort)
-    const sftpUser = `gp_s${serverId}`;
-    try {
-        await deleteSftpUser(sftpUser);
-    } catch (err) {
-        logError('SERVICE:SERVER_DELETE:SFTP_USER', err, { serverId, sftpUser });
-    }
-
-    // Regenerate sshd match file (best effort)
-    try {
-        await regenerateSshdMatchFromDb();
-    } catch (err) {
-        logError('SERVICE:SERVER_DELETE:SSHD_REGEN', err, { serverId });
-    }
-
-    // Delete DB record (last)
     await serverRepository.delete(serverId);
 
     sendGameUninstalledTelemetry({
         serverId,
-        gameKey: server.game_key,
+        provider: server.provider,
+        catalogId: server.catalog_id,
+        dockerImage: server.provider === 'external' ? server.docker_image : null,
     });
 
     bus.emit('server.deleted', { serverId, timestamp: nowIso() });

@@ -26,9 +26,7 @@ interface SystemMetrics {
 }
 
 type UsagePoint = { time: string; timestamp: number; value: number };
-type UsageChartPoint = { time: string; timestamp: number; value: number | null };
 type NetworkPoint = { time: string; timestamp: number; in: number; out: number };
-type NetworkChartPoint = { time: string; timestamp: number; in: number | null; out: number | null };
 
 const chartTimeFormatter = new Intl.DateTimeFormat('en-US', {
   month: 'short',
@@ -64,6 +62,7 @@ export function HostStatus() {
   const [networkHistory, setNetworkHistory] = useState<NetworkPoint[]>([]);
   const [sharedZoom, setSharedZoom] = useState(100);
   const [sharedOffset, setSharedOffset] = useState(0);
+  const [selectedTimeRange, setSelectedTimeRange] = useState<'1h' | '3h' | '6h' | '12h' | '24h'>('24h');
 
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState(0);
@@ -262,13 +261,18 @@ export function HostStatus() {
     setIsDragging(false);
   };
 
-  const handleChartWheel = (event: React.WheelEvent) => {
-    event.preventDefault();
-    event.stopPropagation();
+  const handleSetTimeRange = useCallback((range: '1h' | '3h' | '6h' | '12h' | '24h') => {
+    const zoom = (parseInt(range) / 24) * 100;
+    setSelectedTimeRange(range);
+    setSharedZoom(zoom);
+    setSharedOffset(0);
+  }, []);
 
+  const handleChartWheel = useCallback((event: WheelEvent) => {
+    event.preventDefault();
     const zoomDelta = event.deltaY > 0 ? 10 : -10;
     setSharedZoom((currentZoom) => Math.max(10, Math.min(100, currentZoom + zoomDelta)));
-  };
+  }, []);
 
   const formatTime = (timestamp: any): string => {
     try {
@@ -299,59 +303,6 @@ export function HostStatus() {
     if (Number.isFinite(numeric)) return formatTime(numeric);
     return 'N/A';
   };
-
-  const addUsageGaps = useCallback(
-    (data: UsagePoint[]): UsageChartPoint[] => {
-      if (!data || data.length === 0) return [];
-
-      const next: UsageChartPoint[] = [];
-      for (let i = 0; i < data.length; i += 1) {
-        const current = data[i];
-        next.push({ ...current });
-
-        const upcoming = data[i + 1];
-        if (!upcoming) continue;
-
-        if (upcoming.timestamp - current.timestamp > metricsGapThresholdMs) {
-          next.push({
-            time: formatTime(current.timestamp + 1),
-            timestamp: current.timestamp + 1,
-            value: null,
-          });
-        }
-      }
-
-      return next;
-    },
-    [metricsGapThresholdMs]
-  );
-
-  const addNetworkGaps = useCallback(
-    (data: NetworkPoint[]): NetworkChartPoint[] => {
-      if (!data || data.length === 0) return [];
-
-      const next: NetworkChartPoint[] = [];
-      for (let i = 0; i < data.length; i += 1) {
-        const current = data[i];
-        next.push({ ...current });
-
-        const upcoming = data[i + 1];
-        if (!upcoming) continue;
-
-        if (upcoming.timestamp - current.timestamp > metricsGapThresholdMs) {
-          next.push({
-            time: formatTime(current.timestamp + 1),
-            timestamp: current.timestamp + 1,
-            in: null,
-            out: null,
-          });
-        }
-      }
-
-      return next;
-    },
-    [metricsGapThresholdMs]
-  );
 
   const dedupeByTimestamp = <T extends { timestamp: number }>(points: T[]): T[] => {
     if (points.length <= 1) return points;
@@ -791,12 +742,11 @@ export function HostStatus() {
   const networkOutSpeed = formatSpeed(networkOut);
   const historyChartHeight = 250;
 
-  const cardBg = 'bg-[#111827]';
+  const cardBg = 'bg-gp-surface-card';
   const cardBorder = 'border-gray-800';
-  const cardShadow = '';
+  const cardShadow = 'shadow-[0_4px_20px_rgba(2,6,23,0.5),0_1px_4px_rgba(2,6,23,0.3)]';
   const textPrimary = 'text-white';
   const textSecondary = 'text-gray-400';
-  const textTertiary = 'text-gray-500';
   const progressBg = 'bg-gray-700';
   const chartGridColor = ODS_CHART_THEME.grid;
   const chartAxisColor = ODS_CHART_THEME.axis;
@@ -830,6 +780,8 @@ export function HostStatus() {
       chartAxisColor={chartAxisColor}
       chartTooltipBg={chartTooltipBg}
       chartTooltipBorder={chartTooltipBorder}
+      selectedTimeRange={selectedTimeRange}
+      onSetTimeRange={handleSetTimeRange}
       handleMouseDown={handleMouseDown}
       handleMouseMove={handleMouseMove}
       handleMouseUp={handleMouseUp}

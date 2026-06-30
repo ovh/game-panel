@@ -8,7 +8,14 @@ import {
 
 export type SortField = 'name' | 'game' | 'status' | null;
 export type SortOrder = 'asc' | 'desc';
-export type MetricType = 'cpu' | 'memory';
+export type MetricType = 'cpu' | 'memory' | 'disk' | 'network';
+
+export function formatNetworkSpeed(bytesPerSec: number | undefined): string {
+  if (bytesPerSec === undefined || bytesPerSec === null || !Number.isFinite(bytesPerSec)) return '–';
+  if (bytesPerSec >= 1024 * 1024) return `${(bytesPerSec / (1024 * 1024)).toFixed(1)} MB/s`;
+  if (bytesPerSec >= 1024) return `${(bytesPerSec / 1024).toFixed(1)} KB/s`;
+  return `${Math.round(bytesPerSec)} B/s`;
+}
 
 export const METRICS_HISTORY_REQUEST_LIMIT = 2000;
 const METRIC_TIMELINE_MAX_MS = 24 * 60 * 60 * 1000;
@@ -37,19 +44,6 @@ const metricTooltipFormatter = new Intl.DateTimeFormat('en-US', {
   hour12: false,
 });
 
-const SERVER_SETTINGS_PERMISSIONS = [
-  'server.power',
-  'server.gamesettings.write',
-  'fs.read',
-  'fs.write',
-  'backups.download',
-  'backups.create',
-  'backups.settings.write',
-  'backups.delete',
-  'sftp.manage',
-  'ssh.terminal',
-];
-
 export function hasServerPermission(
   currentUser: AuthUser | null | undefined,
   permissionsByServer: Record<string, string[]> | undefined,
@@ -62,16 +56,16 @@ export function hasServerPermission(
 }
 
 export function canOpenServerSettings(
-  currentUser: AuthUser | null | undefined,
-  permissionsByServer: Record<string, string[]> | undefined,
-  serverId: string
+  _currentUser: AuthUser | null | undefined,
+  _permissionsByServer: Record<string, string[]> | undefined,
+  _serverId: string
 ) {
-  if (currentUser?.isRoot) return true;
-
-  const permissions = permissionsByServer?.[serverId] || [];
-  if (permissions.includes('*')) return true;
-
-  return SERVER_SETTINGS_PERMISSIONS.some((permission) => permissions.includes(permission));
+  // The modal is always openable so every menu stays visible; each tab is
+  // greyed-out (and its content gated) when the user lacks the relevant
+  // permission. Reading per-section data is permission-gated server-side
+  // (e.g. `backups.read`, `scheduledtasks.read`), so an opener with no rights
+  // simply sees every section greyed-out.
+  return true;
 }
 
 export function formatMetricValue(status: string, metric?: number) {
@@ -89,6 +83,12 @@ export function getServerStatusPresentation(status: string) {
         normalizedStatus,
         label: formatServerStatusLabel(normalizedStatus),
         className: 'bg-green-900/40 text-green-400 border-green-500/30',
+      };
+    case 'creating':
+      return {
+        normalizedStatus,
+        label: formatServerStatusLabel(normalizedStatus),
+        className: 'bg-purple-900/40 text-purple-300 border-purple-500/30',
       };
     case 'installing':
       return {

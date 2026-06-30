@@ -1,21 +1,15 @@
 import { useEffect, useState } from 'react';
 import { apiClient } from '../../utils/api';
-import { joinPath, parseCronSchedule } from './utils';
+import { joinPath } from './utils';
 import type { BackupItem } from './actionHandlers';
 
 interface UseBackupStateArgs {
   serverId?: number | null;
   isActive: boolean;
+  isLinuxGSMGame: boolean;
 }
 
-export function useBackupState({ serverId, isActive }: UseBackupStateArgs) {
-  const [autoBackupEnabled, setAutoBackupEnabled] = useState(false);
-  const [backupFrequencyType, setBackupFrequencyType] = useState<'hourly' | 'daily' | 'weekly'>(
-    'daily'
-  );
-  const [backupHours, setBackupHours] = useState(6);
-  const [backupTime, setBackupTime] = useState('02:00');
-  const [backupDay, setBackupDay] = useState('sunday');
+export function useBackupState({ serverId, isActive, isLinuxGSMGame }: UseBackupStateArgs) {
   const [backupRetention, setBackupRetention] = useState(7);
   const [backups, setBackups] = useState<BackupItem[]>([]);
   const [backupsPath, setBackupsPath] = useState('/');
@@ -23,7 +17,6 @@ export function useBackupState({ serverId, isActive }: UseBackupStateArgs) {
   const [backupsError, setBackupsError] = useState<string | null>(null);
   const [backupSettingsLoading, setBackupSettingsLoading] = useState(false);
   const [backupSettingsError, setBackupSettingsError] = useState<string | null>(null);
-  const [backupCronError, setBackupCronError] = useState<string | null>(null);
   const [stopOnBackup, setStopOnBackup] = useState(false);
   const [backupRetentionDays, setBackupRetentionDays] = useState(0);
   const [backupNowLoading, setBackupNowLoading] = useState(false);
@@ -31,41 +24,51 @@ export function useBackupState({ serverId, isActive }: UseBackupStateArgs) {
   const [backupSaving, setBackupSaving] = useState(false);
   const [backupDownloadLoading, setBackupDownloadLoading] = useState<string | null>(null);
   const [backupDeleteLoading, setBackupDeleteLoading] = useState<string | null>(null);
+  const [backupRestoreLoading, setBackupRestoreLoading] = useState<string | null>(null);
+  const [backupRenameLoading, setBackupRenameLoading] = useState<string | null>(null);
+  const [backupsNotSupported, setBackupsNotSupported] = useState(false);
 
-  const loadBackups = async (path: string = '/') => {
+  const loadBackups = async () => {
     if (!serverId) return;
     setBackupsLoading(true);
     setBackupsError(null);
+    setBackupsNotSupported(false);
     try {
-      const result = await apiClient.listBackups(serverId, path);
-      const items: BackupItem[] = result.entries.map((entry) => ({
-        name: entry.name,
-        path: joinPath(result.path || '/', entry.name),
-        size: entry.size,
-        modifiedAt: entry.modifiedAt,
-      }));
+      const result = await apiClient.listBackups(serverId);
+      const items: BackupItem[] = result.entries
+        .map((entry) => ({
+          name: entry.name,
+          path: joinPath(result.path || '/', entry.name),
+          size: entry.size,
+          modifiedAt: entry.modifiedAt,
+        }))
+        .sort((a, b) => new Date(b.modifiedAt).getTime() - new Date(a.modifiedAt).getTime());
       setBackupsPath(result.path || '/');
       setBackups(items);
     } catch (error: any) {
-      setBackupsError(error?.response?.data?.error || 'Failed to load backups');
+      if (error?.response?.status === 501) {
+        setBackupsNotSupported(true);
+      } else {
+        setBackupsError(error?.response?.data?.error || 'Failed to load backups');
+      }
     } finally {
       setBackupsLoading(false);
     }
   };
 
   const loadBackupSettings = async () => {
-    if (!serverId) return;
+    if (!serverId || !isLinuxGSMGame) return;
     setBackupSettingsLoading(true);
     setBackupSettingsError(null);
     try {
       const settings = await apiClient.getBackupSettings(serverId);
-      const maxBackups = Number.isFinite(settings.maxbackups)
-        ? Math.max(0, settings.maxbackups)
+      const maxBackups = Number.isFinite(settings.maxBackups)
+        ? Math.max(0, settings.maxBackups)
         : 7;
       setBackupRetention(maxBackups);
-      setStopOnBackup(Boolean(settings.stoponbackup));
-      const maxDays = Number.isFinite(settings.maxbackupdays)
-        ? Math.max(0, settings.maxbackupdays)
+      setStopOnBackup(Boolean(settings.stopOnBackup));
+      const maxDays = Number.isFinite(settings.maxBackupDays)
+        ? Math.max(0, settings.maxBackupDays)
         : 0;
       setBackupRetentionDays(maxDays);
     } catch (error: any) {
@@ -75,36 +78,9 @@ export function useBackupState({ serverId, isActive }: UseBackupStateArgs) {
     }
   };
 
-  const loadBackupCron = async () => {
-    if (!serverId) return;
-    setBackupCronError(null);
-    try {
-      const cron = await apiClient.getBackupCron(serverId);
-      if (!cron.enabled) {
-        setAutoBackupEnabled(false);
-        return;
-      }
-
-      setAutoBackupEnabled(true);
-      const parsed = parseCronSchedule(cron.schedule, {
-        hours: 6,
-        time: '02:00',
-        day: 'sunday',
-      });
-      if (parsed) {
-        setBackupFrequencyType(parsed.type);
-        setBackupHours(parsed.hours);
-        setBackupTime(parsed.time);
-        setBackupDay(parsed.day);
-      }
-    } catch (error: any) {
-      setBackupCronError(error?.response?.data?.error || 'Failed to load backup schedule');
-    }
-  };
-
   const loadBackupData = async () => {
     if (!serverId) return;
-    await Promise.all([loadBackups('/'), loadBackupSettings(), loadBackupCron()]);
+    await Promise.all([loadBackups(), loadBackupSettings()]);
   };
 
   useEffect(() => {
@@ -113,16 +89,6 @@ export function useBackupState({ serverId, isActive }: UseBackupStateArgs) {
   }, [isActive, serverId]);
 
   return {
-    autoBackupEnabled,
-    setAutoBackupEnabled,
-    backupFrequencyType,
-    setBackupFrequencyType,
-    backupHours,
-    setBackupHours,
-    backupTime,
-    setBackupTime,
-    backupDay,
-    setBackupDay,
     backupRetention,
     setBackupRetention,
     backups,
@@ -133,8 +99,6 @@ export function useBackupState({ serverId, isActive }: UseBackupStateArgs) {
     backupSettingsLoading,
     backupSettingsError,
     setBackupSettingsError,
-    backupCronError,
-    setBackupCronError,
     stopOnBackup,
     setStopOnBackup,
     backupRetentionDays,
@@ -149,8 +113,12 @@ export function useBackupState({ serverId, isActive }: UseBackupStateArgs) {
     setBackupDownloadLoading,
     backupDeleteLoading,
     setBackupDeleteLoading,
+    backupRestoreLoading,
+    setBackupRestoreLoading,
+    backupRenameLoading,
+    setBackupRenameLoading,
+    backupsNotSupported,
     loadBackups,
     loadBackupSettings,
-    loadBackupCron,
   };
 }

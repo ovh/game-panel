@@ -11,7 +11,7 @@ interface ReleaseConfigKeyDefinition {
   format?: ReleaseConfigKeyFormatDefinition | null;
 }
 
-export interface ReleaseConfigKeyFormatDefinition {
+interface ReleaseConfigKeyFormatDefinition {
   type?: string | null;
   step?: number | null;
   entrySeparator?: string | null;
@@ -22,7 +22,7 @@ export interface ReleaseConfigKeyFormatDefinition {
   commentPrefixes?: string[] | null;
 }
 
-export interface ReleaseConfigFileFormatDefinition {
+interface ReleaseConfigFileFormatDefinition {
   type?: string;
   entrySeparator?: string | null;
   keyValueSeparator?: string | null;
@@ -30,12 +30,6 @@ export interface ReleaseConfigFileFormatDefinition {
   quoteValues?: boolean | null;
   spacesAroundSeparator?: boolean | null;
   commentPrefixes?: string[] | null;
-}
-
-interface CatalogLogPrompt {
-  title?: string;
-  match: string;
-  action: string;
 }
 
 export interface CatalogNewsItem {
@@ -53,7 +47,6 @@ export interface CatalogResourceItem {
   title: string;
   description: string;
   url: string;
-  readTimeMinutes: number;
   category: string;
   mediaType: string;
   gameKey: string | null;
@@ -65,26 +58,3 @@ export interface ReleaseConfigFileDefinition {
   keys?: Record<string, ReleaseConfigKeyDefinition> | null;
 }
 
-export interface CatalogGameItem {
-  shortname: string;
-  gameservername: string;
-  gamename: string;
-  isLinuxGSMGame: boolean;
-  isCheckedByAdmin: boolean;
-  requireSteamCredentials?: boolean;
-  requireGameCopy?: boolean;
-  dockerImage: string | null;
-  tcpPorts: Record<string, string> | null;
-  udpPorts: Record<string, string> | null;
-  healthcheck: { type: string; port?: number; name?: string } | null;
-  configFiles?: ReleaseConfigFileDefinition[] | string[] | string | null;
-  config_files?: ReleaseConfigFileDefinition[] | string[] | string | null;
-  logPrompts?: CatalogLogPrompt[] | null;
-  updatedAt?: number;
-}
-
-export interface GameUpdateCronState {
-  enabled: boolean;
-  schedule: string;
-  line: string | null;
-}

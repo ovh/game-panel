@@ -1,5 +1,14 @@
 import os from 'os';
 import { docker } from './client.js';
+import { round2 } from '../number.js';
+
+type NetworkSample = {
+    rx: number;
+    tx: number;
+    timestamp: number;
+};
+
+const lastNetworkSamples = new Map<string, NetworkSample>();
 
 const clampPercent = (n: number) => {
     if (!Number.isFinite(n)) return 0;
@@ -8,18 +17,15 @@ const clampPercent = (n: number) => {
     return n;
 };
 
-const round2 = (n: number) => Math.round(n * 100) / 100;
-
 export async function getContainerStats(containerId: string): Promise<{
     cpuUsage: number; // 0..100 (% host)
     memoryUsage: number; // 0..100 (% host)
+    networkUsage: { in: number; out: number }; // bytes/s
 }> {
     const container = docker.getContainer(containerId);
     const stats = (await container.stats({ stream: false })) as any;
 
-    // --------------------
     // CPU (normalized host %)
-    // --------------------
     const cpuTotal = stats.cpu_stats?.cpu_usage?.total_usage ?? 0;
     const preCpuTotal = stats.precpu_stats?.cpu_usage?.total_usage ?? 0;
 
@@ -35,9 +41,7 @@ export async function getContainerStats(containerId: string): Promise<{
     }
     cpuUsage = round2(clampPercent(cpuUsage));
 
-    // --------------------
     // Memory (% of host RAM)
-    // --------------------
     const hostTotal = os.totalmem(); // bytes
     const memUsageRaw = stats.memory_stats?.usage ?? 0;
 
@@ -56,5 +60,32 @@ export async function getContainerStats(containerId: string): Promise<{
     }
     memoryUsage = round2(clampPercent(memoryUsage));
 
-    return { cpuUsage, memoryUsage };
+    // Network (bytes/s)
+    let rx = 0;
+    let tx = 0;
+
+    const networks = stats.networks ?? {};
+    for (const networkStats of Object.values(networks) as any[]) {
+        const rxBytes = Number(networkStats?.rx_bytes ?? 0);
+        const txBytes = Number(networkStats?.tx_bytes ?? 0);
+
+        if (Number.isFinite(rxBytes)) rx += rxBytes;
+        if (Number.isFinite(txBytes)) tx += txBytes;
+    }
+
+    const timestamp = Date.now();
+    const previousNetworkSample = lastNetworkSamples.get(containerId);
+    let networkUsage = { in: 0, out: 0 };
+
+    if (previousNetworkSample) {
+        const elapsedSeconds = Math.max((timestamp - previousNetworkSample.timestamp) / 1000, 1);
+        networkUsage = {
+            in: Math.max(0, Math.round((rx - previousNetworkSample.rx) / elapsedSeconds)),
+            out: Math.max(0, Math.round((tx - previousNetworkSample.tx) / elapsedSeconds)),
+        };
+    }
+
+    lastNetworkSamples.set(containerId, { rx, tx, timestamp });
+
+    return { cpuUsage, memoryUsage, networkUsage };
 }

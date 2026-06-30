@@ -25,15 +25,19 @@ interface ServerSettingsActionModalsProps {
   submitCreateEntry: () => Promise<void> | void;
   showDeleteEntryModal: boolean;
   deleteEntryTarget: DeleteEntryTarget | null;
+  deleteMultiNames?: string[] | null;
   deleteEntryLoading: boolean;
   closeDeleteEntryModal: () => void;
   confirmDeleteEntry: () => Promise<void> | void;
   showBackupNowWarningModal: boolean;
   backupNowLoading: boolean;
   stopOnBackup: boolean;
+  hotBackupOnly?: boolean;
   closeBackupWarningModal: () => void;
   executeBackupNow: () => Promise<void>;
 }
+
+import { useBodyScrollLock } from '../../src/ui/utils/useBodyScrollLock';
 
 export function ServerSettingsActionModals({
   modalBg,
@@ -54,15 +58,18 @@ export function ServerSettingsActionModals({
   submitCreateEntry,
   showDeleteEntryModal,
   deleteEntryTarget,
+  deleteMultiNames,
   deleteEntryLoading,
   closeDeleteEntryModal,
   confirmDeleteEntry,
   showBackupNowWarningModal,
   backupNowLoading,
   stopOnBackup,
+  hotBackupOnly = false,
   closeBackupWarningModal,
   executeBackupNow,
 }: ServerSettingsActionModalsProps) {
+  useBodyScrollLock(showCreateEntryModal || showDeleteEntryModal || showBackupNowWarningModal);
   const handleCreateClose = () => {
     if (createEntryLoading) return;
     closeCreateEntryModal();
@@ -128,9 +135,10 @@ export function ServerSettingsActionModals({
               </AppButton>
               <AppButton
                 type="button"
+                tone="primary"
                 onClick={() => void submitCreateEntry()}
                 disabled={createEntryLoading}
-                className="rounded bg-[#0050D7] px-4 py-2 text-sm font-medium text-white hover:bg-[#157EEA] hover:text-white disabled:opacity-60"
+                className="rounded px-4 py-2 text-sm font-medium disabled:opacity-60"
               >
                 {createEntryLoading ? 'Creating...' : 'Create'}
               </AppButton>
@@ -139,14 +147,16 @@ export function ServerSettingsActionModals({
         </div>
       )}
 
-      {showDeleteEntryModal && deleteEntryTarget && (
+      {showDeleteEntryModal && (deleteEntryTarget || (deleteMultiNames && deleteMultiNames.length > 0)) && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-[60]">
           <div
             className={`${modalBg} border ${borderColor} rounded-lg shadow-xl max-w-md w-full p-6`}
           >
             <div className="flex items-center justify-between gap-3 mb-4">
               <h3 className={`text-lg font-semibold ${textPrimary}`}>
-                Delete {deleteEntryTarget.type}
+                {deleteMultiNames && deleteMultiNames.length > 0
+                  ? `Delete ${deleteMultiNames.length} item${deleteMultiNames.length > 1 ? 's' : ''}`
+                  : `Delete ${deleteEntryTarget?.type}`}
               </h3>
               <AppButton
                 type="button"
@@ -158,24 +168,38 @@ export function ServerSettingsActionModals({
             </div>
 
             <p className={`text-sm ${textSecondary}`}>
-              Are you sure you want to delete{' '}
-              <span className={`font-medium ${textPrimary}`}>{deleteEntryTarget.name}</span>?
+              {deleteMultiNames && deleteMultiNames.length > 0 ? (
+                <>
+                  Are you sure you want to permanently delete{' '}
+                  <span className={`font-medium ${textPrimary}`}>
+                    {deleteMultiNames.length} item{deleteMultiNames.length > 1 ? 's' : ''}
+                  </span>
+                  ? This cannot be undone.
+                </>
+              ) : (
+                <>
+                  Are you sure you want to delete{' '}
+                  <span className={`font-medium ${textPrimary}`}>{deleteEntryTarget?.name}</span>?
+                </>
+              )}
             </p>
 
             <div className="mt-6 flex items-center justify-end gap-2">
               <AppButton
                 type="button"
+                tone="neutral"
                 onClick={handleDeleteClose}
-                className="rounded bg-gray-700 px-4 py-2 text-sm text-white hover:bg-gray-600 disabled:opacity-60"
+                className="rounded px-4 py-2 text-sm disabled:opacity-60"
                 disabled={deleteEntryLoading}
               >
                 Cancel
               </AppButton>
               <AppButton
                 type="button"
+                tone="critical"
                 onClick={() => void confirmDeleteEntry()}
                 disabled={deleteEntryLoading}
-                className="rounded bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-500 disabled:opacity-60"
+                className="rounded px-4 py-2 text-sm font-medium disabled:opacity-60"
               >
                 {deleteEntryLoading ? 'Deleting...' : 'Delete'}
               </AppButton>
@@ -203,7 +227,11 @@ export function ServerSettingsActionModals({
             <div className="flex items-start gap-3 mb-4">
               <AlertTriangle className="w-5 h-5 text-yellow-400 mt-0.5 flex-shrink-0" />
               <p className={`text-sm ${textSecondary}`}>
-                {stopOnBackup ? (
+                {hotBackupOnly ? (
+                  <>
+                    A backup will be created while the server is running. Do you want to continue?
+                  </>
+                ) : stopOnBackup ? (
                   <>
                     The server is not fully stopped and{' '}
                     <span className={`font-medium ${textPrimary}`}>Stop server before backup</span>{' '}
@@ -224,19 +252,21 @@ export function ServerSettingsActionModals({
             <div className="mt-6 flex items-center justify-end gap-2">
               <AppButton
                 type="button"
+                tone="neutral"
                 onClick={closeBackupWarningModal}
-                className="rounded bg-gray-700 px-4 py-2 text-sm text-white hover:bg-gray-600 disabled:opacity-60"
+                className="rounded px-4 py-2 text-sm disabled:opacity-60"
                 disabled={backupNowLoading}
               >
                 Cancel
               </AppButton>
               <AppButton
                 type="button"
+                tone="primary"
                 onClick={async () => {
                   closeBackupWarningModal();
                   await executeBackupNow();
                 }}
-                className="rounded bg-[#0050D7] px-4 py-2 text-sm font-medium text-white hover:bg-[#157EEA] hover:text-white disabled:opacity-60"
+                className="rounded px-4 py-2 text-sm font-medium disabled:opacity-60"
                 disabled={backupNowLoading}
               >
                 {backupNowLoading ? 'Creating backup...' : 'Continue backup'}

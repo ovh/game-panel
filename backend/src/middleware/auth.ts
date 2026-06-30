@@ -4,18 +4,12 @@ import { extractTokenFromHeader, verifyToken } from '../utils/auth.js';
 import { userRepository, serverMemberRepository } from '../database/index.js';
 import { parsePositiveIntId } from '../utils/ids.js';
 import { logError } from '../utils/logger.js';
+import { PERMISSIONS } from '../permissions.js';
 
 export interface AuthenticatedRequest extends Request {
   user?: JWTPayload;
 }
 
-/**
- * Auth middleware:
- * - Extracts the Bearer token from the Authorization header
- * - Verifies the JWT
- * - Verifies user still exists and is enabled
- * - Attaches the decoded payload to req.user
- */
 export async function authMiddleware(
   req: AuthenticatedRequest,
   res: Response,
@@ -42,6 +36,11 @@ export async function authMiddleware(
       return;
     }
 
+    if (payload.tokenVersion !== user.token_version) {
+      res.status(401).json({ error: 'Invalid token' });
+      return;
+    }
+
     req.user = { ...payload, isRoot: Boolean(user.is_root) };
     next();
   } catch (err) {
@@ -49,9 +48,6 @@ export async function authMiddleware(
   }
 }
 
-/**
- * Root-only guard. Requires authMiddleware before it.
- */
 export function rootOnly(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
   if (!req.user?.isRoot) {
     res.status(403).json({ error: 'Root access required' });
@@ -60,9 +56,6 @@ export function rootOnly(req: AuthenticatedRequest, res: Response, next: NextFun
   next();
 }
 
-/**
- * Global permission guard (panel-wide), e.g. "users.manage".
- */
 export function requireGlobalPermission(perm: string) {
   return async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
     try {
@@ -122,6 +115,46 @@ export function requireServerPermission(permission: string) {
       return res.status(500).json({ error: 'Server authorization failed' });
     }
   };
+}
+
+export async function userHasServerPermission(
+  user: JWTPayload | undefined,
+  serverId: number,
+  permission: string
+): Promise<boolean> {
+  if (!user) return false;
+  if (user.isRoot) return true;
+
+  const perms = await serverMemberRepository.getUserServerPermissions(serverId, user.userId);
+  return perms.includes('*') || perms.includes(permission);
+}
+
+export async function buildServerEnvVisibility(
+  user: { userId?: number; isRoot?: boolean } | undefined
+): Promise<(serverId: number) => boolean> {
+  if (user?.isRoot) return () => true;
+  if (!user?.userId) return () => false;
+
+  const memberships = (await serverMemberRepository.listByUser(user.userId)) as Array<{
+    server_id: number;
+    permissions_json: string;
+  }>;
+
+  const allowed = new Set<number>();
+  for (const membership of memberships) {
+    let perms: string[] = [];
+    try {
+      const parsed = JSON.parse(membership.permissions_json ?? '[]');
+      if (Array.isArray(parsed)) perms = parsed.filter((x) => typeof x === 'string');
+    } catch {
+      // Treat unparseable permissions as none.
+    }
+    if (perms.includes('*') || perms.includes(PERMISSIONS.server.env)) {
+      allowed.add(membership.server_id);
+    }
+  }
+
+  return (serverId: number) => allowed.has(serverId);
 }
 
 type HttpError = Error & {

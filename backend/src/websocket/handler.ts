@@ -3,6 +3,7 @@ import { WebSocketServer, type RawData } from 'ws';
 import crypto from 'node:crypto';
 import { handleTerminalWsMessage, cleanupTerminalWs } from './terminalWs.js';
 import type { AuthenticatedWebSocket, WSMessage } from './types.js';
+import { parseIncomingWebSocketMessage } from './incoming.js';
 import { authenticateFromMessage, authenticateFromRequest, sendSafe } from './auth.js';
 import { attachBroadcaster } from './broadcaster.js';
 import {
@@ -15,20 +16,16 @@ import {
   handleSubscribeServers,
   handleSubscribeSystemMetrics,
   handleUnsubscribe,
-  handleSubscribeConsoleStatus,
+  handleSubscribeFileTransfers,
 } from './subscriptions.js';
 import { userRepository, serverMemberRepository } from '../database/index.js';
 import { startSystemMetricsPoller } from './pollers/systemMetricsPoller.js';
 import { startServerMetricsPoller } from './pollers/serverMetricsPoller.js';
 import { logError } from '../utils/logger.js';
+import { PERMISSIONS } from '../permissions.js';
 
 const WS_AUTH_TIMEOUT_MS = 3_000;
 const WS_ACCOUNT_VALIDATION_TTL_MS = 5_000;
-
-function parseMessage(data: RawData): WSMessage {
-  const text = typeof data === 'string' ? data : data.toString();
-  return JSON.parse(text) as WSMessage;
-}
 
 async function ensureWsUserEnabled(ws: AuthenticatedWebSocket): Promise<boolean> {
   if (!ws.userId) return false;
@@ -51,6 +48,12 @@ async function ensureWsUserEnabled(ws: AuthenticatedWebSocket): Promise<boolean>
   if (!user.is_enabled) {
     sendSafe(ws, { type: 'error', error: 'Account disabled' });
     ws.close(1008, 'Account disabled');
+    return false;
+  }
+
+  if (ws.tokenVersion !== user.token_version) {
+    sendSafe(ws, { type: 'error', error: 'Unauthorized' });
+    ws.close(1008, 'Unauthorized');
     return false;
   }
 
@@ -93,8 +96,6 @@ export function setupWebSocket(wss: WebSocketServer): void {
   }, 30_000);
 
   wss.on('connection', (ws: AuthenticatedWebSocket, req: IncomingMessage) => {
-    console.log('WebSocket client connected');
-
     ws.isAlive = true;
 
     if (!authenticateFromRequest(ws, req)) return;
@@ -107,7 +108,7 @@ export function setupWebSocket(wss: WebSocketServer): void {
       }, WS_AUTH_TIMEOUT_MS);
     }
 
-    (ws as any)._gpClientId = crypto.randomUUID();
+    ws.gpClientId = crypto.randomUUID();
 
     ws.on('pong', () => {
       ws.isAlive = true;
@@ -115,8 +116,8 @@ export function setupWebSocket(wss: WebSocketServer): void {
 
     ws.on('message', async (data: RawData) => {
       try {
-        const message = parseMessage(data);
-        await routeMessage(wss, ws, message);
+        const message = parseIncomingWebSocketMessage(data);
+        await routeMessage(ws, message);
       } catch (error) {
         logError('WS:MESSAGE', error);
         sendSafe(ws, { type: 'error', error: 'Invalid message' });
@@ -131,8 +132,6 @@ export function setupWebSocket(wss: WebSocketServer): void {
 
       cleanupTerminalWs(ws);
       cleanupClient(ws);
-
-      console.log('WebSocket client disconnected');
     });
 
     ws.on('error', (error) => {
@@ -163,7 +162,6 @@ export function setupWebSocket(wss: WebSocketServer): void {
 }
 
 async function routeMessage(
-  wss: WebSocketServer,
   ws: AuthenticatedWebSocket,
   message: WSMessage
 ): Promise<void> {
@@ -181,15 +179,6 @@ async function routeMessage(
   // Validate account state once per socket to reject disabled/deleted users.
   if (!(await ensureWsUserEnabled(ws))) return;
 
-  function toValidServerId(v: any): number | null {
-    const n = typeof v === 'number' ? v : Number(v);
-    return Number.isFinite(n) && n > 0 ? n : null;
-  }
-
-  function extractServerIdFromMsg(msg: any): number | null {
-    return toValidServerId(msg?.serverId) ?? toValidServerId(msg?.data?.serverId);
-  }
-
   switch (message.type) {
     // Some clients may still send auth even if already authed via headers.
     // Return a success ack to keep auth handshakes idempotent.
@@ -202,16 +191,15 @@ async function routeMessage(
     case 'terminal:input':
     case 'terminal:resize': {
       // Apply a permission check whenever a server ID is available in the payload.
-      const serverId = extractServerIdFromMsg(message as any);
-      if (serverId) {
-        const ok = await hasServerPermission(ws, serverId, 'ssh.terminal');
+      if (message.serverId) {
+        const ok = await hasServerPermission(ws, message.serverId, PERMISSIONS.container.terminal);
         if (!ok) {
           sendSafe(ws, { type: 'error', error: 'Insufficient server permissions' });
           return;
         }
       }
 
-      await handleTerminalWsMessage(ws, message as any);
+      await handleTerminalWsMessage(ws, message);
       return;
     }
 
@@ -220,57 +208,34 @@ async function routeMessage(
       return;
 
     case 'subscribe:logs': {
-      const serverId = extractServerIdFromMsg(message as any);
-      if (!serverId) {
-        sendSafe(ws, { type: 'error', error: 'Missing serverId' });
-        return;
-      }
-
-      const ok = await hasServerPermission(ws, serverId, 'server.logs.read');
+      const ok = await hasServerPermission(ws, message.serverId, PERMISSIONS.container.logsRead);
       if (!ok) {
         sendSafe(ws, { type: 'error', error: 'Insufficient server permissions' });
         return;
       }
 
-      await handleSubscribeLogs(ws, serverId, message);
+      await handleSubscribeLogs(ws, message.serverId, message);
       return;
     }
 
     case 'subscribe:actions': {
-      const serverId = extractServerIdFromMsg(message as any);
-      if (!serverId) {
-        sendSafe(ws, { type: 'error', error: 'Missing serverId' });
-        return;
-      }
-
-      await handleSubscribeActions(ws, serverId, message);
+      await handleSubscribeActions(ws, message.serverId, message);
       return;
     }
 
-    case 'subscribe:console-status': {
-      const serverId = extractServerIdFromMsg(message as any);
-      if (!serverId) {
-        sendSafe(ws, { type: 'error', error: 'Missing serverId' });
-        return;
-      }
-
-      const ok = await hasServerPermission(ws, serverId, 'server.console');
+    case 'subscribe:file-transfers': {
+      const ok = await hasServerPermission(ws, message.serverId, PERMISSIONS.fs.read);
       if (!ok) {
         sendSafe(ws, { type: 'error', error: 'Insufficient server permissions' });
         return;
       }
 
-      await handleSubscribeConsoleStatus(wss, ws, serverId);
+      await handleSubscribeFileTransfers(ws, message.serverId, message);
       return;
     }
 
     case 'subscribe:metrics': {
-      const serverId = extractServerIdFromMsg(message as any);
-      if (!serverId) {
-        sendSafe(ws, { type: 'error', error: 'Missing serverId' });
-        return;
-      }
-      await handleSubscribeMetrics(ws, serverId, message);
+      await handleSubscribeMetrics(ws, message.serverId, message);
       return;
     }
 
@@ -279,17 +244,12 @@ async function routeMessage(
       return;
 
     case 'subscribe:install': {
-      const serverId = extractServerIdFromMsg(message as any);
-      if (!serverId) {
-        sendSafe(ws, { type: 'error', error: 'Missing serverId' });
-        return;
-      }
-      await handleSubscribeInstall(ws, serverId);
+      await handleSubscribeInstall(ws, message.serverId);
       return;
     }
 
     case 'unsubscribe':
-      await handleUnsubscribe(ws, (message as any).channel, (message as any).serverId);
+      await handleUnsubscribe(ws, message.channel, message.serverId);
       return;
 
     case 'ping':

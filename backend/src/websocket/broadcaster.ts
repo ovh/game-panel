@@ -2,29 +2,28 @@ import type { WebSocketServer } from 'ws';
 import { bus } from '../realtime/bus.js';
 import type { AuthenticatedWebSocket } from './types.js';
 import { sendSafe } from './auth.js';
-import { serverRepository, installProgressRepository } from '../database/index.js';
-import * as dockerUtils from '../utils/docker.js';
+import { serverRepository, installProgressRepository, serverMemberRepository } from '../database/index.js';
 import { logError } from '../utils/logger.js';
+import { PERMISSIONS } from '../permissions.js';
 import { nowIso, toIsoTimestamp } from '../utils/time.js';
 import type {
     ServerActionEvent,
     ServerCreatedEvent,
     ServerDeletedEvent,
+    ServerInstallInteractionEvent,
     ServerInstallProgressEvent,
-    ServerSftpEvent,
+    ServerFileTransferEvent,
     ServerStatusEvent,
     ServerUpdatedEvent,
     SystemRebootingEvent,
 } from '../types/events.js';
-import type { GameServerRow } from '../types/gameServer.js';
+import { redactServerEnv, serializeGameServerWithInstallProgress } from '../utils/apiSerialization.js';
 
 interface BroadcasterCleanup {
     shutdown(): void;
 }
 
-/**
- * Bridges internal realtime bus -> WebSocket broadcasts
- */
+// Bridges internal realtime bus -> WebSocket broadcasts
 export function attachBroadcaster(wss: WebSocketServer): BroadcasterCleanup {
     const broadcastToServersSubscribers = async (
         serverId: number,
@@ -44,28 +43,30 @@ export function attachBroadcaster(wss: WebSocketServer): BroadcasterCleanup {
         const server = await serverRepository.findById(serverId);
         if (!server) return;
 
-        let actualStatus = server.status;
-        if (server.docker_container_id) {
-            const containerStatus = await dockerUtils.checkContainerStatus(
-                server.docker_container_id
-            );
-            if (containerStatus !== 'running') actualStatus = 'stopped';
-        }
-
         const installProgress = await installProgressRepository.getByServerId(serverId);
 
-        const payloadServer = {
-            ...(server as GameServerRow),
-            status: actualStatus,
-            install_progress: installProgress,
-        };
+        const fullServer = serializeGameServerWithInstallProgress(server, installProgress);
+        const redactedServer = redactServerEnv(fullServer);
+        const envVisibilityByUser = new Map<number, boolean>();
 
         for (const client of wss.clients) {
             const ws = client as AuthenticatedWebSocket;
             if (!ws.userId || !ws.subs) continue;
             if (!ws.subs.servers) continue;
 
-            sendSafe(ws, { type, server: payloadServer, timestamp: nowIso() });
+            let canSeeEnv = ws.isRoot === true;
+            if (!canSeeEnv) {
+                const cached = envVisibilityByUser.get(ws.userId);
+                if (cached !== undefined) {
+                    canSeeEnv = cached;
+                } else {
+                    const perms = await serverMemberRepository.getUserServerPermissions(serverId, ws.userId);
+                    canSeeEnv = perms.includes('*') || perms.includes(PERMISSIONS.server.env);
+                    envVisibilityByUser.set(ws.userId, canSeeEnv);
+                }
+            }
+
+            sendSafe(ws, { type, server: canSeeEnv ? fullServer : redactedServer, timestamp: nowIso() });
         }
     };
 
@@ -88,17 +89,6 @@ export function attachBroadcaster(wss: WebSocketServer): BroadcasterCleanup {
             await broadcastToServersSubscribers(e.serverId, 'servers:updated');
         } catch (err) {
             logError('WS:BROADCAST:SERVERS_STATUS', err, { serverId: e.serverId });
-        }
-    };
-
-    const onServerSftp = async (evt: unknown) => {
-        const e = evt as ServerSftpEvent;
-        if (!e.serverId) return;
-
-        try {
-            await broadcastToServersSubscribers(e.serverId, 'servers:updated');
-        } catch (err) {
-            logError('WS:BROADCAST:SERVERS_SFTP', err, { serverId: e.serverId });
         }
     };
 
@@ -128,6 +118,7 @@ export function attachBroadcaster(wss: WebSocketServer): BroadcasterCleanup {
         const e = evt as ServerActionEvent;
 
         if (!e.serverId) return;
+        const timestamp = toIsoTimestamp(e.timestamp);
 
         for (const client of wss.clients) {
             const ws = client as AuthenticatedWebSocket;
@@ -140,11 +131,13 @@ export function attachBroadcaster(wss: WebSocketServer): BroadcasterCleanup {
                 serverId: e.serverId,
                 action: {
                     id: e.actionId ?? null,
+                    serverId: e.serverId,
                     level: e.level ?? 'info',
                     message: e.message ?? '',
-                    actor_username: e.actorUsername ?? null,
+                    actorUsername: e.actorUsername ?? null,
+                    timestamp,
                 },
-                timestamp: toIsoTimestamp(e.timestamp),
+                timestamp,
             });
         }
     };
@@ -171,6 +164,49 @@ export function attachBroadcaster(wss: WebSocketServer): BroadcasterCleanup {
         }
     };
 
+    const onInstallInteraction = (evt: unknown) => {
+        const e = evt as ServerInstallInteractionEvent;
+        if (!e.serverId) return;
+
+        for (const client of wss.clients) {
+            const ws = client as AuthenticatedWebSocket;
+            if (!ws.userId || !ws.subs) continue;
+
+            if (!ws.subs.install?.has(e.serverId)) continue;
+
+            sendSafe(ws, {
+                type: 'install:interaction',
+                id: e.id,
+                serverId: e.serverId,
+                kind: e.kind,
+                status: e.status,
+                payload: e.payload ?? {},
+                response: e.response ?? null,
+                expiresAt: e.expiresAt ?? null,
+                timestamp: toIsoTimestamp(e.timestamp),
+            });
+        }
+    };
+
+    const onFileTransfer = (evt: unknown) => {
+        const e = evt as ServerFileTransferEvent;
+        if (!e.serverId || !e.job) return;
+
+        for (const client of wss.clients) {
+            const ws = client as AuthenticatedWebSocket;
+            if (!ws.userId || !ws.subs) continue;
+
+            if (!ws.subs.fileTransfers?.has(e.serverId)) continue;
+
+            sendSafe(ws, {
+                type: 'file-transfer:progress',
+                serverId: e.serverId,
+                job: e.job,
+                timestamp: toIsoTimestamp(e.timestamp),
+            });
+        }
+    };
+
     const onSystemRebooting = (evt: unknown) => {
         const e = evt as SystemRebootingEvent;
 
@@ -192,7 +228,8 @@ export function attachBroadcaster(wss: WebSocketServer): BroadcasterCleanup {
     bus.on('server.created', onServerCreated);
     bus.on('server.deleted', onServerDeleted);
     bus.on('server.install.progress', onInstallProgress);
-    bus.on('server.sftp', onServerSftp);
+    bus.on('server.install.interaction', onInstallInteraction);
+    bus.on('server.file.transfer', onFileTransfer);
     bus.on('system.rebooting', onSystemRebooting);
 
     return {
@@ -204,7 +241,8 @@ export function attachBroadcaster(wss: WebSocketServer): BroadcasterCleanup {
                 bus.off('server.created', onServerCreated);
                 bus.off('server.deleted', onServerDeleted);
                 bus.off('server.install.progress', onInstallProgress);
-                bus.off('server.sftp', onServerSftp);
+                bus.off('server.install.interaction', onInstallInteraction);
+                bus.off('server.file.transfer', onFileTransfer);
                 bus.off('system.rebooting', onSystemRebooting);
             } catch {
                 // Ignore listener cleanup errors during shutdown.

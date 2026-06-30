@@ -13,12 +13,12 @@ export function Resources() {
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const cardBg = 'bg-[#111827]';
+  const cardBg = 'bg-gp-surface-card shadow-[0_4px_20px_rgba(2,6,23,0.5),0_1px_4px_rgba(2,6,23,0.3)]';
   const cardBorder = 'border-gray-800';
   const textPrimary = 'text-white';
   const textSecondary = 'text-gray-300';
   const textTertiary = 'text-gray-400';
-  const inputBg = 'bg-[#1f2937]';
+  const inputBg = 'bg-gp-surface-elevated';
   const inputBorder = 'border-gray-700';
 
   useEffect(() => {
@@ -135,7 +135,7 @@ export function Resources() {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search by title, description, or game key..."
-                className={`h-12 w-full ${inputBg} border ${inputBorder} rounded-lg pl-12 pr-4 ${textPrimary} focus:outline-none focus:border-[#0050D5] focus:ring-2 focus:ring-[#0050D5]/30 placeholder-gray-500 transition-all`}
+                className={`h-12 w-full ${inputBg} border ${inputBorder} rounded-lg pl-12 pr-4 ${textPrimary} focus:outline-none focus:border-[var(--gp-ods-accent-primary)] focus:ring-2 focus:ring-[var(--gp-ods-accent-primary)]/30 placeholder-gray-500 transition-all`}
               />
             </div>
           </div>
@@ -189,7 +189,7 @@ export function Resources() {
                 href={resource.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className={`${cardBg} rounded-xl p-6 border ${cardBorder} hover:border-gray-700 transition-all duration-300 group hover:shadow-xl hover:-translate-y-1`}
+                className={`${cardBg} flex h-full flex-col rounded-xl p-6 border ${cardBorder} hover:border-gray-700 transition-all duration-300 group hover:shadow-xl hover:-translate-y-1`}
               >
                 <div className="flex items-start justify-between mb-5">
                   <div
@@ -203,7 +203,7 @@ export function Resources() {
                 </div>
 
                 <h3
-                  className={`text-xl font-semibold mb-3 ${textPrimary} group-hover:text-[#0050D5] transition-colors`}
+                  className={`text-xl font-semibold mb-3 line-clamp-2 min-h-[3.5rem] ${textPrimary} group-hover:text-[var(--gp-ods-accent-primary)] transition-colors`}
                 >
                   {resource.title}
                 </h3>
@@ -213,7 +213,7 @@ export function Resources() {
                 </p>
 
                 <div
-                  className={`flex items-center justify-between gap-2 pt-4 border-t border-gray-800`}
+                  className={`mt-auto flex items-center justify-between gap-2 pt-4 border-t border-gray-800`}
                 >
                   <span className="text-xs font-medium px-3 py-1.5 rounded-full bg-gray-800 text-gray-300">
                     {resource.category}
@@ -223,9 +223,6 @@ export function Resources() {
                       <span className="px-2 py-1 rounded-full bg-gray-800/80 text-gray-300">
                         {resource.gameKey.toUpperCase()}
                       </span>
-                    )}
-                    {Number.isFinite(resource.readTimeMinutes) && resource.readTimeMinutes > 0 && (
-                      <span className="font-medium">{resource.readTimeMinutes} min</span>
                     )}
                   </div>
                 </div>
@@ -238,7 +235,7 @@ export function Resources() {
               <AppButton
                 onClick={() => setShowAll(!showAll)}
                 tone="primary"
-                className="px-8 py-4 bg-[#0050D5] text-white transition-all duration-300 font-semibold shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+                className="px-8 py-4 bg-[var(--gp-ods-accent-primary)] text-white transition-all duration-300 font-semibold shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
               >
                 {showAll
                   ? 'Show Less'

@@ -1,6 +1,7 @@
 import { getConfig } from './config.js';
 import cors, { type CorsOptions } from 'cors';
-import express, { type Application, type NextFunction, type Request, type Response } from 'express';
+import express, { type Application, type Request, type Response } from 'express';
+import helmet from 'helmet';
 import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
 import { reconcileDockerHealthToDb, startDockerHealthEventListener } from './services/dockerEvents.js';
@@ -12,9 +13,15 @@ import userRoutes from './routes/users.js';
 import serverMembersRoutes from './routes/serverMembers.js';
 import serverRoutes from './routes/servers.js';
 import systemRoutes from './routes/system.js';
+import catalogRoutes from './routes/catalog.js';
 import { setupWebSocket } from './websocket/handler.js';
 import { getAppVersion } from './utils/appInfo.js';
-import { logError } from './utils/logger.js';
+import { logError, logInfo } from './utils/logger.js';
+import { startLinuxGsmManifestRefreshJob } from './services/linuxGsmManifest.js';
+import { startFileTransferCleanupJob } from './services/fileTransfers.js';
+import { startScheduledTaskRunner } from './services/scheduledTasks.js';
+import { reconcileStalePanelUpdate } from './services/panelUpdates.js';
+import { nowIso } from './utils/time.js';
 
 const { port, frontendUrl, trustProxy } = getConfig();
 const API_BODY_LIMIT = '2mb';
@@ -33,11 +40,14 @@ function toOrigin(value: string): string | null {
 
 const configuredOrigin = toOrigin(frontendUrl);
 if (!configuredOrigin) {
-  throw new Error('FRONTEND_URL must be a valid absolute URL');
+  throw new Error('DOMAIN must produce a valid frontend origin');
 }
 const allowedOrigins = new Set<string>([configuredOrigin]);
 
 let dockerHealthListener: { stop: () => void } | null = null;
+let linuxGsmRefreshJob: { stop: () => void } | null = null;
+let fileTransferCleanupJob: { stop: () => void } | null = null;
+let scheduledTaskRunner: { stop: () => void } | null = null;
 
 const corsOptions: CorsOptions = {
   origin(origin, callback) {
@@ -55,8 +65,9 @@ const corsOptions: CorsOptions = {
   allowedHeaders: ['Content-Type', 'Authorization'],
 };
 
-// In production the backend sits behind Traefik, so req.ip must honor the proxy chain.
 app.set('trust proxy', trustProxy);
+
+app.use(helmet());
 
 // CORS + preflight
 app.use(cors(corsOptions));
@@ -66,27 +77,25 @@ app.options('*', cors(corsOptions));
 app.use(express.json({ limit: API_BODY_LIMIT }));
 app.use(express.urlencoded({ extended: true, limit: API_BODY_LIMIT }));
 
-/**
- * Basic request logging.
- * If this becomes noisy later, we can replace it with a real logger (pino/winston/morgan).
- */
-app.use((req: Request, _res: Response, next: NextFunction) => {
-  console.log(`${new Date().toISOString()} ${req.method} ${req.path}`);
-  next();
-});
-
-// API routes
+// /api/auth
 app.use('/api/auth', authRoutes);
+// /api/users
 app.use('/api/users', authMiddleware, userRoutes);
+// /api/servers/:id/members
 app.use('/api/servers', authMiddleware, serverMembersRoutes);
+// /api/servers
 app.use('/api/servers', authMiddleware, serverRoutes);
+// /api/catalog
+app.use('/api/catalog', authMiddleware, catalogRoutes);
+// /api/system
 app.use('/api/system', authMiddleware, systemRoutes);
 
-// Health check (no auth required)
+// GET /api/health
 app.get('/api/health', (_req: Request, res: Response) => {
-  res.json({ status: 'healthy', timestamp: new Date().toISOString() });
+  res.json({ status: 'healthy', timestamp: nowIso() });
 });
 
+// GET /api/version
 app.get('/api/version', (_req: Request, res: Response) => {
   const { instanceId } = getConfig();
   res.json({
@@ -106,24 +115,31 @@ app.use(errorHandler);
 // WebSocket server
 setupWebSocket(wss);
 
-/**
- * Bootstraps the app: database init + HTTP server start.
- */
+
+// Bootstraps the app: database init + HTTP server start.
 async function startServer(): Promise<void> {
   try {
-    console.log('Initializing database...');
+    logInfo('APP', 'Initializing database...');
     await initializeDatabase();
     await ensureRootUserExists();
-    console.log('Database initialized');
+    logInfo('APP', 'Database initialized');
 
     // Sync current Docker health -> DB once at boot
     await reconcileDockerHealthToDb();
 
+    // Clear a panel update job left dangling by an interrupted updater
+    await reconcileStalePanelUpdate().catch((error) => {
+      logError('APP:STARTUP:PANEL_UPDATE_RECONCILE', error);
+    });
+
     // Then listen to live Docker health changes
     dockerHealthListener = startDockerHealthEventListener();
+    linuxGsmRefreshJob = startLinuxGsmManifestRefreshJob();
+    fileTransferCleanupJob = startFileTransferCleanupJob();
+    scheduledTaskRunner = startScheduledTaskRunner();
 
     httpServer.listen(port, () => {
-      console.log('Game Panel backend listening on port ' + port);
+      logInfo('APP', 'Game Panel backend listening on port ' + port);
     });
   } catch (error) {
     logError('APP:STARTUP', error);
@@ -131,10 +147,7 @@ async function startServer(): Promise<void> {
   }
 }
 
-/**
- * Gracefully closes the HTTP server and exits the process.
- * We handle both SIGINT and SIGTERM with the same logic.
- */
+// Gracefully closes the HTTP server and exits the process.
 let shuttingDown = false;
 
 function setupGracefulShutdown(): void {
@@ -142,11 +155,14 @@ function setupGracefulShutdown(): void {
     if (shuttingDown) return;
     shuttingDown = true;
 
-    console.log(`\n${signal} received, shutting down gracefully...`);
+    logInfo('APP', `${signal} received, shutting down gracefully...`);
 
     try {
       // 1) Stop docker listener
       dockerHealthListener?.stop();
+      linuxGsmRefreshJob?.stop();
+      fileTransferCleanupJob?.stop();
+      scheduledTaskRunner?.stop();
 
       // 2) Close WebSocket clients then server
       wss.clients.forEach((ws) => {
@@ -165,7 +181,7 @@ function setupGracefulShutdown(): void {
       // 4) Close DB connection (if you keep a singleton)
       await closeDatabase();
 
-      console.log('Server closed');
+      logInfo('APP', 'Server closed');
       process.exit(0);
     } catch (err) {
       logError('APP:SHUTDOWN', err);

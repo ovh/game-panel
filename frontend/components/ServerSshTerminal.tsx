@@ -1,9 +1,11 @@
 import { AlertTriangle } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { Terminal as XTerm } from 'xterm';
-import { FitAddon } from 'xterm-addon-fit';
-import 'xterm/css/xterm.css';
+import { AppButton } from '../src/ui/components';
+import { Terminal as XTerm } from '@xterm/xterm';
+import { FitAddon } from '@xterm/addon-fit';
+import '@xterm/xterm/css/xterm.css';
 import { apiClient } from '../utils/api';
+import { isServerRunningStatus } from '../utils/serverRuntime';
 
 const style = document.createElement('style');
 style.textContent = `
@@ -23,11 +25,12 @@ if (typeof document !== 'undefined') {
 interface ServerSshTerminalProps {
   serverId?: number | null;
   serverName: string;
+  serverStatus?: string | null;
 }
 
 type TerminalStatus = 'idle' | 'creating' | 'connecting' | 'connected' | 'closed' | 'error';
 
-export function ServerSshTerminal({ serverId, serverName }: ServerSshTerminalProps) {
+export function ServerSshTerminal({ serverId, serverStatus }: ServerSshTerminalProps) {
   const [disclaimerAccepted, setDisclaimerAccepted] = useState(false);
   const [status, setStatus] = useState<TerminalStatus>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -41,7 +44,6 @@ export function ServerSshTerminal({ serverId, serverName }: ServerSshTerminalPro
   const resizeDisposableRef = useRef<{ dispose: () => void } | null>(null);
   const dataDisposableRef = useRef<{ dispose: () => void } | null>(null);
   const encoderRef = useRef<TextEncoder>(new TextEncoder());
-  const decoderRef = useRef<TextDecoder>(new TextDecoder());
 
   const encodeBase64 = (data: string) => {
     const encoded = encoderRef.current.encode(data);
@@ -246,65 +248,56 @@ export function ServerSshTerminal({ serverId, serverName }: ServerSshTerminalPro
     setDisclaimerAccepted(false);
   }, [serverId]);
 
-  const statusStyles: Record<TerminalStatus, string> = {
-    idle: 'bg-gray-500/10 text-gray-300 border-gray-500/30',
-    creating: 'bg-blue-500/10 text-blue-300 border-blue-500/30',
-    connecting: 'bg-blue-500/10 text-blue-300 border-blue-500/30',
-    connected: 'bg-green-500/10 text-green-300 border-green-500/30',
-    closed: 'bg-yellow-500/10 text-yellow-300 border-yellow-500/30',
-    error: 'bg-red-500/10 text-red-300 border-red-500/30',
-  };
-
-  const statusLabels: Record<TerminalStatus, string> = {
-    idle: 'Idle',
-    creating: 'Creating session',
-    connecting: 'Connecting',
-    connected: 'Connected',
-    closed: 'Disconnected',
-    error: 'Error',
-  };
 
   return (
     <div className="flex flex-col h-full">
       <div className="mb-4 flex flex-col gap-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h3 className="text-2xl font-bold text-white">SSH Terminal</h3>
+            <h3 className="text-2xl font-bold text-white">Terminal</h3>
           </div>
         </div>
       </div>
 
       {!serverId && (
-        <div className="bg-[#1f2937] border border-gray-700 rounded-lg p-5 text-sm text-gray-300">
+        <div className="bg-gp-surface-elevated border border-gray-700 rounded-lg p-5 text-sm text-gray-300">
           Terminal access is not available until this server is fully provisioned.
         </div>
       )}
 
-      {serverId && !disclaimerAccepted ? (
-        <div className="bg-[#1f2937] border border-yellow-500/40 rounded-lg p-5">
+      {serverId && !isServerRunningStatus(serverStatus) && (
+        <div className="bg-gp-surface-elevated border border-amber-500/40 rounded-lg p-5 flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-amber-400 mt-0.5 flex-shrink-0" />
+          <p className="text-sm text-amber-200">The server must be <strong>running</strong> to open a terminal session.</p>
+        </div>
+      )}
+
+      {serverId && isServerRunningStatus(serverStatus) && !disclaimerAccepted ? (
+        <div className="bg-gp-surface-elevated border border-yellow-500/40 rounded-lg p-5">
           <div className="flex items-start gap-3">
             <AlertTriangle className="w-5 h-5 text-yellow-400 mt-0.5" />
             <div className="flex-1">
               <p className="text-sm text-yellow-200 font-semibold mb-2">Advanced feature warning</p>
               <p className="text-sm text-gray-300">
-                This SSH terminal gives full shell access inside the server container. Misuse can
+                This terminal gives full shell access inside the server container. Misuse can
                 break the game server, delete files, or expose sensitive data. Use with caution.
               </p>
               <div className="mt-4 flex flex-wrap gap-3">
-                <button
+                <AppButton
+                  tone="primary"
                   onClick={() => setDisclaimerAccepted(true)}
                   className="px-4 py-2 rounded text-sm font-semibold bg-yellow-500/90 text-gray-900 hover:bg-yellow-400 transition-colors"
                 >
                   I understand, open terminal
-                </button>
+                </AppButton>
               </div>
             </div>
           </div>
         </div>
-      ) : serverId ? (
+      ) : serverId && isServerRunningStatus(serverStatus) ? (
         <div className="flex flex-col flex-1 min-h-0">
           {error && <div className="mb-3 text-xs text-red-300">{error}</div>}
-          <div className="relative flex-1 min-h-[360px] border border-gray-700 rounded-2xl overflow-hidden bg-[#0b1220] shadow-[0_0_0_1px_rgba(17,24,39,0.6),0_20px_40px_-24px_rgba(15,23,42,0.8)]">
+          <div className="relative flex-1 min-h-[360px] border border-gray-700 rounded-2xl overflow-hidden bg-gp-surface-input shadow-[0_0_0_1px_rgba(17,24,39,0.6),0_20px_40px_-24px_rgba(15,23,42,0.8)]">
             <div className="h-full w-full p-2 sm:p-3">
               <div ref={containerRef} className="h-full w-full" />
             </div>
