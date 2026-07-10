@@ -38,8 +38,10 @@ export type OvhcloudBackupRestoreInput = {
 };
 
 export type OvhcloudBackupSupport = {
+    kind?: 'archive' | 'directory';
     extensions: string[];
     location: OvhcloudBackupLocation;
+    resolveLocation?(server: GameServerRow): Promise<OvhcloudBackupLocation>;
     create?(server: GameServerRow & { docker_container_id: string }, options?: Record<string, unknown>): Promise<OvhcloudBackupCreateResult>;
     createUnsupportedMessage?: string;
     restore?(server: GameServerRow & { docker_container_id: string }, input: OvhcloudBackupRestoreInput): Promise<OvhcloudBackupRestoreResult>;

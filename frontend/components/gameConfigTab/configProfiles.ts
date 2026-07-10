@@ -8,7 +8,6 @@ import {
   mergeFieldFormatForWrite,
   normalizeRawValue,
   parsePzLua1Content,
-  parsePwIni1Content,
   parseSdtdXml1Content,
   parseStructuredJsonContent,
   pickDefinedFieldValues,
@@ -18,7 +17,6 @@ import {
   upsertJsonContent,
   upsertKeyValueContent,
   upsertPzLua1Content,
-  upsertPwIni1Content,
   upsertSdtdXml1Content,
 } from './configUtils';
 
@@ -28,13 +26,10 @@ type WritableField = Pick<VerifiedField, 'key' | 'section' | 'format'>;
 export type InlineConfigProfileId =
   | 'cfg_linuxgsm_1'
   | 'json_armar_1'
-  | 'cfg_cs2_1'
   | 'cfg_dayz_1'
   | 'cfg_gmod_1'
   | 'ini_ark_1'
   | 'ini_hz_1'
-  | 'properties_mc_1'
-  | 'ini_pw_1'
   | 'ini_pz_1'
   | 'lua_pz_1'
   | 'cfg_rust_1'
@@ -57,13 +52,10 @@ interface InlineConfigProfileHandler {
 const SUPPORTED_INLINE_CONFIG_PROFILE_IDS = new Set<InlineConfigProfileId>([
   'cfg_linuxgsm_1',
   'json_armar_1',
-  'cfg_cs2_1',
   'cfg_dayz_1',
   'cfg_gmod_1',
   'ini_ark_1',
   'ini_hz_1',
-  'properties_mc_1',
-  'ini_pw_1',
   'ini_pz_1',
   'lua_pz_1',
   'cfg_rust_1',
@@ -380,11 +372,6 @@ const PROFILE_HANDLERS: Record<InlineConfigProfileId, InlineConfigProfileHandler
       pickDefinedFieldValues(parseStructuredJsonContent(content), definition.keys),
     write: (content, key, value) => upsertJsonContent(content, key, value),
   },
-  cfg_cs2_1: {
-    read: (content, _filePath, definition) =>
-      readWhitespaceCommandContent(content, definition, ['//']),
-    write: (content, key, value) => upsertWhitespaceCommandContent(content, key, value, ['//']),
-  },
   cfg_dayz_1: {
     read: (content, _filePath, definition) => readDayzContent(content, definition),
     write: (content, key, value) => upsertDayzContent(content, key, value),
@@ -401,21 +388,6 @@ const PROFILE_HANDLERS: Record<InlineConfigProfileId, InlineConfigProfileHandler
   ini_hz_1: {
     read: readKeyValueProfile('ini'),
     write: writeKeyValueProfile('ini'),
-  },
-  properties_mc_1: {
-    read: readKeyValueProfile('properties'),
-    write: writeKeyValueProfile('properties'),
-  },
-  ini_pw_1: {
-    read: (content, _filePath, definition) =>
-      pickDefinedFieldValues(parsePwIni1Content(content), definition.keys),
-    write: (content, key, value, _filePath, definition, field) =>
-      upsertPwIni1Content(
-        content,
-        key,
-        value,
-        mergeFieldFormatForWrite(definition.format, field?.format)
-      ),
   },
   ini_pz_1: {
     read: readKeyValueProfile('ini'),

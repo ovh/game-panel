@@ -70,6 +70,12 @@ export const PERMISSIONS = {
     counterStrike2: {
         frameworksWrite: 'cs2.frameworks.write',
     },
+    palworld: {
+        settings: {
+            read: 'palworld.settings.read',
+            write: 'palworld.settings.write',
+        },
+    },
 } as const;
 
 function collectPermissionStrings(node: unknown, acc: Set<string>): void {

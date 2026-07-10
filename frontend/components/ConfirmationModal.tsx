@@ -55,8 +55,7 @@ export function ConfirmationModal({
     setSubmitting(true);
     setError(null);
     try {
-      // Await the action so failures surface inline and the modal only closes on success
-      // — previously it closed immediately and swallowed rejections (false "success").
+      // Await the action so failures surface inline and the modal only closes on success.
       await onConfirm();
       onClose();
     } catch (err: any) {

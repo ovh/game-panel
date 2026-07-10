@@ -235,7 +235,7 @@ export function Resources() {
               <AppButton
                 onClick={() => setShowAll(!showAll)}
                 tone="primary"
-                className="px-8 py-4 bg-[var(--gp-ods-accent-primary)] text-white transition-all duration-300 font-semibold shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+                className="px-8 py-4 bg-[var(--gp-ods-accent-primary)] !text-white transition-all duration-300 font-semibold shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
               >
                 {showAll
                   ? 'Show Less'

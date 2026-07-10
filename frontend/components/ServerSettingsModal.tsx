@@ -1,8 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GameConfigTab } from './GameConfigTab';
 
-// Lazily loaded so the xterm terminal emulator is only fetched when the Terminal tab
-// is opened, not on initial app load.
+// Lazily loaded so the xterm terminal emulator stays off initial load until the Terminal tab opens.
 const ServerSshTerminal = lazy(() =>
   import('./ServerSshTerminal').then((m) => ({ default: m.ServerSshTerminal }))
 );
@@ -70,7 +69,16 @@ export function ServerSettingsModal({
 }: ServerSettingsModalProps) {
   const isLinuxGSMGame = serverProvider === 'linuxgsm';
   const isExternalProvider = serverProvider === 'external';
-  const isHytaleOvhcloud = serverProvider === 'ovhcloud' && serverGame === 'hytale';
+  // OVHcloud games are identified by `providerMetadata.family` (minecraft / counter-strike /
+  // hytale / palworld) rather than catalogId, so they stay wired identically across renames.
+  const ovhcloudFamily = (() => {
+    if (serverProvider !== 'ovhcloud') return null;
+    try {
+      return (JSON.parse(serverProviderMetadataJson ?? '{}')?.family as string | undefined) ?? null;
+    } catch { return null; }
+  })();
+  const isHytaleOvhcloud = ovhcloudFamily === 'hytale';
+  const isPalworldOvhcloud = ovhcloudFamily === 'palworld';
   const isCS2Ovhcloud = (() => {
     if (serverProvider !== 'ovhcloud') return false;
     try {
@@ -120,8 +128,9 @@ export function ServerSettingsModal({
   const ovhcloudConfigFiles = useMemo(() => {
     if (isMinecraftJavaOvhcloud) return ['/server.properties'];
     if (isHytaleOvhcloud) return ['/game/Server/config.json'];
+    if (isPalworldOvhcloud) return ['/server/Pal/Saved/Config/LinuxServer/PalWorldSettings.ini'];
     return undefined;
-  }, [isMinecraftJavaOvhcloud, isHytaleOvhcloud]);
+  }, [isMinecraftJavaOvhcloud, isHytaleOvhcloud, isPalworldOvhcloud]);
 
   const serverBackupSupported = (() => {
     if (serverProvider === 'linuxgsm') return true;
@@ -137,9 +146,8 @@ export function ServerSettingsModal({
   })();
 
   const [activeTab, setActiveTab] = useState<SettingsTab>('filemanager');
-  // Tracks whether the user has explicitly clicked a tab during the current
-  // open session. Until they do, the active tab follows the computed default,
-  // which can change as server permissions load in asynchronously.
+  // Until the user clicks a tab, the active tab follows the computed default (which shifts as
+  // permissions load in asynchronously).
   const hasUserSelectedTabRef = useRef(false);
   const [containerConfigSaveCount, setContainerConfigSaveCount] = useState(0);
 
@@ -281,46 +289,40 @@ export function ServerSettingsModal({
     canReadHytaleMods,
     canWriteHytaleMods,
     canUseHytale,
+    canReadPalworldSettings,
+    canWritePalworldSettings,
+    canUsePalworld,
     canWriteCS2Frameworks,
     canAccessTab: baseCanAccessTab,
   } = createServerSettingsAccess(currentUser, serverPermissions);
 
-  // Whether this server type even has a Game Config surface. Like Terminal, the
-  // tab stays visible (greyed-out) when the user lacks the permissions to see
-  // any content, rather than being shown empty or vanishing entirely.
+  // Whether this server type has a Game Config surface at all. Like Terminal, the tab stays
+  // visible but greyed-out when the user lacks the permissions to see any content.
   const gameConfigApplicable =
     !isExternalProvider &&
     (isMinecraftJavaOvhcloud ||
       isMinecraftBedrockOvhcloud ||
       isHytaleOvhcloud ||
+      isPalworldOvhcloud ||
       isCS2Ovhcloud ||
       isLinuxGSMGame);
 
-  // Whether the Game Config tab actually has content to show for this user.
-  // Each game/provider exposes a different config surface, gated by its own
-  // permission:
-  //  - OVHcloud Minecraft (Java/Bedrock): the Minecraft management sections
-  //  - OVHcloud Hytale: the Hytale settings/mods sections
-  //  - OVHcloud CS2: the CS2 config (behind `server.edit`)
-  //  - LinuxGSM images: on-disk config-file editors (need `fs.read`)
-  // Without the relevant permission the tab would render empty, so we treat it
-  // as inaccessible and grey it out instead.
+  // Whether the Game Config tab has content for this user: each game exposes a different config
+  // surface gated by its own permission. Without it the tab is treated as inaccessible.
   const gameConfigHasContent =
     ((isMinecraftJavaOvhcloud || isMinecraftBedrockOvhcloud) && canUseMinecraft) ||
     (isHytaleOvhcloud && canUseHytale) ||
+    (isPalworldOvhcloud && canUsePalworld) ||
     (isCS2Ovhcloud && canEditContainerConfig) ||
     (isLinuxGSMGame && canUseFileManager);
 
   const canUseGameConfigTab = gameConfigApplicable;
   const canAccessTab = (tab: SettingsTab): boolean => {
     if (tab === 'gameconfig') return gameConfigHasContent;
-    // Backups require the server to support them AND `backups.read` to list
-    // them / read their settings. Write actions inside stay gated per-permission.
+    // Backups require both server support and `backups.read`.
     if (tab === 'backup') return serverBackupSupported && canReadBackups;
-    // Container config (ports, mounts, healthcheck, limits…) is readable by
-    // anyone — the backend serves it ungated and redacts `env` for callers
-    // without `server.env`. Editing is gated inside the tab via `canEdit`
-    // (`server.edit`); the env section is hidden without `server.env`.
+    // Container config is readable by anyone (backend redacts `env` without `server.env`);
+    // editing is gated inside the tab.
     if (tab === 'containerconfig') return true;
     return baseCanAccessTab(tab);
   };
@@ -331,10 +333,8 @@ export function ServerSettingsModal({
     setActiveTab(tab);
   };
   const defaultTab = SETTINGS_TAB_PRIORITY.find((tab) => canAccessTab(tab)) ?? 'filemanager';
-  // Until the user explicitly picks a tab, derive the displayed tab from the
-  // computed default during render instead of relying on the post-paint effect
-  // below — otherwise the modal briefly shows the stale `activeTab` and visibly
-  // jumps to the default on the next frame.
+  // Derive the displayed tab during render (not from the effect below), else the modal briefly
+  // shows a stale activeTab and visibly jumps to the default on the next frame.
   const effectiveActiveTab = hasUserSelectedTabRef.current ? activeTab : defaultTab;
   useBodyScrollLock(isOpen);
 
@@ -454,8 +454,8 @@ export function ServerSettingsModal({
     async (files: File[]) => {
       if (!serverId || !canWriteFiles) return;
 
-      // react-dropzone exposes each file's path relative to a dropped folder on `file.path`
-      // (e.g. "/mymod/sub/file.txt"). Preserve that structure instead of flattening to file.name.
+      // Preserve each file's folder-relative path (react-dropzone puts it on `file.path`)
+      // instead of flattening to file.name.
       const relativePathOf = (file: File): string => {
         const raw = String((file as any).path || (file as any).webkitRelativePath || file.name || '')
           .replace(/\\/g, '/');
@@ -591,11 +591,8 @@ export function ServerSettingsModal({
 
   useEffect(() => {
     if (!isOpen) return;
-    // Until the user explicitly picks a tab, keep following the computed
-    // default. Server permissions load asynchronously after the modal opens,
-    // so the default can shift from the last-resort fallback (Scheduled Tasks,
-    // which is always accessible) to a higher-priority tab (e.g. Game Config)
-    // once permissions arrive.
+    // Until the user picks a tab, keep following the computed default, which can shift as
+    // permissions load in asynchronously after the modal opens.
     if (!hasUserSelectedTabRef.current) {
       if (activeTab !== defaultTab) setActiveTab(defaultTab);
       return;
@@ -784,6 +781,19 @@ export function ServerSettingsModal({
               canWriteSettings: canWriteHytaleSettings,
               canReadMods: canReadHytaleMods,
               canWriteMods: canWriteHytaleMods,
+              borderColor,
+              contentBg,
+              textPrimary,
+              textSecondary,
+            } : null}
+            palworldProps={isPalworldOvhcloud && serverId && canUsePalworld ? {
+              serverId,
+              serverStatus,
+              canReadSettings: canReadPalworldSettings,
+              canWriteSettings: canWritePalworldSettings,
+              canManageEnv,
+              canEditContainerConfig,
+              containerConfigSaveCount,
               borderColor,
               contentBg,
               textPrimary,

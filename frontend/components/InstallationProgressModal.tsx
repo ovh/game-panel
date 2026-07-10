@@ -129,8 +129,7 @@ export function InstallationProgressModal({
     });
   }, [installPlan, normalizedStatus]);
 
-  // Escape only dismisses once the install has settled (success/failed) — an
-  // in-progress install intentionally has no quick close.
+  // Escape only dismisses once the install has settled; an in-progress install has no quick close.
   const dialogRef = useRef<HTMLDivElement>(null);
   useFocusTrap(isOpen, dialogRef, {
     onEscape: installationStatus === 'installing' ? undefined : onClose,

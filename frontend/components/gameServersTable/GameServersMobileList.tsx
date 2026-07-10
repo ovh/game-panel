@@ -14,8 +14,8 @@ import type { GameServer } from '../../types/gameServer';
 import type { AuthUser } from '../../utils/permissions';
 import { PUBLIC_CONNECTION_HOST } from '../../utils/api';
 import {
-  isServerRunningStatus,
-  isServerStoppedStatus,
+  isServerUpLike,
+  isServerDownLike,
   isServerTransitioningStatus,
   isServerCreatingStatus,
   isServerInstallingStatus,
@@ -92,8 +92,9 @@ export function GameServersMobileList({
       {filteredAndSortedServers.map((server) => {
         const { normalizedStatus, label: statusLabel, className: statusClassName } =
           getServerStatusPresentation(server.status);
-        const isRunning = isServerRunningStatus(server.status);
-        const isStopped = isServerStoppedStatus(server.status);
+        // Up-like (running/unhealthy) → live metrics + Stop; down-like (stopped/failed) → Start.
+        const isUpLike = isServerUpLike(server.status);
+        const isDownLike = isServerDownLike(server.status);
         const isCreating = isServerCreatingStatus(server.status);
         const isInstalling = isServerInstallingStatus(server.status);
         const isTransitioning = isServerTransitioningStatus(server.status);
@@ -194,7 +195,13 @@ export function GameServersMobileList({
                   type="button"
                   onClick={() => openHistoryModal(server, canReadLogs)}
                   disabled={!canReadLogs}
-                  title={canReadLogs ? 'Open history logs' : 'Missing permission: container.logs.read'}
+                  title={
+                    normalizedStatus === 'failed' && server.lastError
+                      ? `Failed: ${server.lastError}`
+                      : canReadLogs
+                        ? 'Open history logs'
+                        : 'Missing permission: container.logs.read'
+                  }
                   className={`gp-status-badge absolute right-4 top-4 inline-flex w-28 items-center justify-center rounded-full border px-2 py-1 text-center text-sm font-semibold leading-none tracking-[0.04em] whitespace-nowrap transition-colors ${statusClassName} ${
                     canReadLogs ? 'hover:brightness-110' : 'opacity-60 cursor-not-allowed'
                   }`}
@@ -204,7 +211,7 @@ export function GameServersMobileList({
               )}
             </div>
 
-            {isRunning && (
+            {isUpLike && (
               <>
                 <div className="flex items-center gap-3 mb-2 px-3 py-2 rounded-lg border bg-gray-800 border-gray-700">
                   <div className="flex-1 flex items-center justify-between min-w-0">
@@ -267,7 +274,7 @@ export function GameServersMobileList({
             )}
 
             <div className="flex gap-2 mb-3">
-              {isRunning ? (
+              {isUpLike ? (
                 <AppButton
                   disabled={!canTriggerPowerAction}
                   onClick={() => onConfirmAction(server.id, server.name, 'stop')}
@@ -280,7 +287,7 @@ export function GameServersMobileList({
                   <Square className="w-4 h-4" />
                   Stop
                 </AppButton>
-              ) : isStopped ? (
+              ) : isDownLike ? (
                 <AppButton
                   disabled={!canTriggerPowerAction}
                   onClick={() => onConfirmAction(server.id, server.name, 'start')}

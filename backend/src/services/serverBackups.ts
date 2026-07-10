@@ -50,7 +50,7 @@ export function getSupportedBackupExtensions(server: GameServerRow): string[] {
     throw Object.assign(new Error('Backups are not supported for external servers'), { statusCode: 501 });
 }
 
-export function getBackupFileLocation(server: GameServerRow): BackupFileLocation {
+export async function getBackupFileLocation(server: GameServerRow): Promise<BackupFileLocation> {
     if (server.provider === 'linuxgsm') {
         getLinuxGsmMetadata(server);
         return {
@@ -61,10 +61,22 @@ export function getBackupFileLocation(server: GameServerRow): BackupFileLocation
     }
 
     if (server.provider === 'ovhcloud') {
-        return getOvhcloudBackupSupport(server).location;
+        const support = getOvhcloudBackupSupport(server);
+        if (support.resolveLocation) {
+            return support.resolveLocation(server);
+        }
+        return support.location;
     }
 
     throw Object.assign(new Error('Backups are not supported for external servers'), { statusCode: 501 });
+}
+
+export function getBackupKind(server: GameServerRow): 'archive' | 'directory' {
+    if (server.provider === 'ovhcloud') {
+        return getOvhcloudBackupSupport(server).kind ?? 'archive';
+    }
+
+    return 'archive';
 }
 
 export function assertSupportedBackupArchive(server: GameServerRow, name: string): void {

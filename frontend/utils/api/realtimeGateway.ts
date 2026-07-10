@@ -182,12 +182,10 @@ export class RealtimeGateway {
           try {
             data = JSON.parse(event.data);
           } catch (error) {
-            // Ignore malformed/non-JSON frames instead of throwing inside the
-            // message pump, which would otherwise abort processing of the frame.
+            // Ignore malformed/non-JSON frames rather than throwing in the message pump.
             if (import.meta.env.DEV) console.error('Failed to parse WebSocket frame:', error);
             return;
           }
-          // Dev-only observability for protocol drift — never drops or mutates frames.
           if (import.meta.env.DEV) {
             const check = parseRealtimeMessage(data);
             if (!check.ok) {
@@ -268,9 +266,7 @@ export class RealtimeGateway {
     if (this.reconnectTimer !== null) return;
 
     this.reconnectAttempts++;
-    // Capped exponential backoff with jitter, retrying indefinitely so a transient
-    // outage always recovers — no hard give-up that would silently freeze the UI on
-    // stale data. The jitter avoids a thundering-herd reconnect after a backend restart.
+    // Capped exponential backoff with jitter; retries indefinitely.
     const exponent = Math.min(this.reconnectAttempts, 6);
     const delay =
       Math.min(this.maxReconnectDelay, this.baseReconnectDelay * 2 ** exponent) +

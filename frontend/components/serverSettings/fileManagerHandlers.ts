@@ -148,8 +148,7 @@ export const createFileManagerHandlers = (deps: CreateFileManagerHandlersDeps) =
     setShowDeleteEntryModal(true);
   };
 
-  // Move one or more entries from the current directory into targetDir (a sibling/child folder or
-  // the parent). Backed by the rename route, which uses fs.rename and moves whole subtrees.
+  // Move entries into targetDir; backed by the rename route (fs.rename, moves whole subtrees).
   const handleMoveEntries = async (names: string[], targetDir: string) => {
     if (!canWriteFiles || !serverId) return;
     const movable = names.filter((name) => name && name !== '..');

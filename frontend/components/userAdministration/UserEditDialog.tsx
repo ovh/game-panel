@@ -11,6 +11,8 @@ import {
   GLOBAL_OPTIONS,
   HYTALE_OVHCLOUD_OPTIONS,
   HYTALE_PRESETS,
+  PALWORLD_OVHCLOUD_OPTIONS,
+  PALWORLD_PRESETS,
   MINECRAFT_OVHCLOUD_OPTIONS,
   MINECRAFT_PRESETS,
   SCHEDULED_TASKS_OPTIONS,
@@ -59,8 +61,7 @@ interface UserEditDialogProps {
   membersError: string | null;
   onSaveChanges: () => void;
   saveLoading: boolean;
-  /** Error shown inline inside the dialog. The modal stays open on failure, so
-   *  a page-level banner would be hidden behind it. */
+  /** Error shown inline; the modal stays open on failure, so a page banner would be hidden. */
   saveError?: string | null;
 }
 
@@ -105,6 +106,7 @@ export function UserEditDialog({
     selectedServer?.catalogId?.includes('neoforge')
   );
   const isHytaleOvhcloudServer = isOvhcloud && selectedServer?.catalogId === 'hytale';
+  const isPalworldOvhcloudServer = isOvhcloud && selectedServer?.catalogId === 'palworld';
   const isExternalServer = selectedServer?.provider === 'external';
   const isBusy = saveLoading;
 
@@ -293,6 +295,7 @@ export function UserEditDialog({
                         const gamePresets = isMinecraftOvhcloudServer
                           ? MINECRAFT_PRESETS.map((p) => ({ ...p, permissions: filterAddons(p.permissions) }))
                           : isHytaleOvhcloudServer ? HYTALE_PRESETS
+                          : isPalworldOvhcloudServer ? PALWORLD_PRESETS
                           : isCs2OvhcloudServer ? CS2_PRESETS
                           : null;
                         // Replace Viewer and Operator with game-enriched versions, keep Full access
@@ -307,8 +310,7 @@ export function UserEditDialog({
                               );
                             })();
                         const noAccessActive = addMemberPerms.length === 0;
-                        // "Custom" = the current permissions match neither "No access"
-                        // nor any named preset chip shown above.
+                        // "Custom" = permissions match neither "No access" nor any named preset.
                         const customActive =
                           !noAccessActive &&
                           !presetChips.some((preset) => samePermissionSet(addMemberPerms, preset.permissions));
@@ -339,8 +341,7 @@ export function UserEditDialog({
                                 </AppButton>
                               );
                             })}
-                            {/* Read-only status chip: highlighted only when the current
-                                permissions don't match any preset above. */}
+                            {/* Read-only status chip: highlighted only when permissions match no preset. */}
                             <AppButton
                               type="button"
                               aria-disabled="true"
@@ -391,7 +392,7 @@ export function UserEditDialog({
                       </div>
                     ))}
 
-                    {/* Backups — masqué pour les images externes et CS2 (pas de backups) */}
+                    {/* Backups — hidden for external images and CS2 */}
                     {!isExternalServer && !isCs2OvhcloudServer && (
                       <div>
                         <span className="mb-2 block text-xs font-medium text-gray-400">Backups</span>
@@ -422,7 +423,7 @@ export function UserEditDialog({
                       </div>
                     )}
 
-                    {/* Minecraft — OVHcloud uniquement */}
+                    {/* Minecraft — OVHcloud only */}
                     {isMinecraftOvhcloudServer && (
                       <div>
                         <span className="mb-2 block text-xs font-medium text-gray-400">Minecraft</span>
@@ -455,7 +456,7 @@ export function UserEditDialog({
                       </div>
                     )}
 
-                    {/* Hytale — OVHcloud uniquement */}
+                    {/* Hytale — OVHcloud only */}
                     {isHytaleOvhcloudServer && (
                       <div>
                         <span className="mb-2 block text-xs font-medium text-gray-400">Hytale</span>
@@ -486,7 +487,38 @@ export function UserEditDialog({
                       </div>
                     )}
 
-                    {/* Counter-Strike 2 — OVHcloud uniquement */}
+                    {/* Palworld — OVHcloud only */}
+                    {isPalworldOvhcloudServer && (
+                      <div>
+                        <span className="mb-2 block text-xs font-medium text-gray-400">Palworld</span>
+                        <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
+                          {PALWORLD_OVHCLOUD_OPTIONS.map((opt) => {
+                            const checked = isServerPermissionChecked(addMemberKnown, opt.value);
+                            return (
+                              <AppToggle
+                                key={`server-opt-${opt.value}`}
+                                ariaLabel={opt.label}
+                                checked={checked}
+                                size="compact"
+                                onChange={() =>
+                                  setAddMemberKnown((current) =>
+                                    toggleServerPermission(current, opt.value)
+                                  )
+                                }
+                                label={opt.label}
+                                className={`w-full flex-row-reverse justify-between rounded border px-3 py-2 transition-colors ${
+                                  checked
+                                    ? 'border-[var(--color-cyan-400)]/50 bg-[#0050D7]/10'
+                                    : 'border-gray-700 bg-[#111827]'
+                                }`}
+                              />
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Counter-Strike 2 — OVHcloud only */}
                     {isCs2OvhcloudServer && (
                       <div>
                         <span className="mb-2 block text-xs font-medium text-gray-400">Counter-Strike 2</span>

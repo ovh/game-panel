@@ -1,9 +1,15 @@
-import { Terminal, Trash2, X, Copy, ArrowDown, CornerDownLeft } from 'lucide-react';
-import { memo, useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react';
+import { Terminal, Trash2, X, Copy, ArrowDown, CornerDownLeft, Maximize2, Minimize2 } from 'lucide-react';
+import { memo, useState, useRef, useEffect, useLayoutEffect, useMemo, Fragment } from 'react';
 import { AppButton, AppToggle } from '../src/ui/components';
+import { useBodyScrollLock } from '../src/ui/utils/useBodyScrollLock';
 import { ansiToHtml, stripAnsi } from '../utils/ansi';
+import { isServerDownLike } from '../utils/serverRuntime';
 import type { GameServer } from '../types/gameServer';
 import type { CLIMessage } from '../types/cli';
+
+const CONSOLE_HEIGHT_STORAGE_KEY = 'gp_console_height';
+const MIN_CONSOLE_HEIGHT = 240;
+const DEFAULT_CONSOLE_HEIGHT = 400;
 
 interface LogEntry {
   id: number;
@@ -16,10 +22,8 @@ interface ServerLogs {
   [serverId: string]: LogEntry[];
 }
 
-// Renders one ANSI log/console line. Memoized so ansiToHtml runs once per
-// (message, className) instead of on every parent re-render — the console re-renders
-// on every new log line, and without this each render re-converted every visible line.
-// Safe: ansiToHtml uses escapeXML:true to sanitize HTML entities before injection.
+// Renders one ANSI log line, memoized so ansiToHtml runs once per (message, className)
+// rather than on every new-log-line re-render. ansiToHtml uses escapeXML:true to sanitize.
 const AnsiLine = memo(function AnsiLine({
   className,
   message,
@@ -59,6 +63,21 @@ export function ServerConsoleTabs({
   onSendCommand,
 }: ServerConsoleTabsProps) {
   const [isMinimized] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [panelHeight, setPanelHeight] = useState(() => {
+    let stored = DEFAULT_CONSOLE_HEIGHT;
+    try {
+      const raw = Number(localStorage.getItem(CONSOLE_HEIGHT_STORAGE_KEY));
+      if (Number.isFinite(raw) && raw > 0) stored = raw;
+    } catch { /* ignore */ }
+    const max = typeof window !== 'undefined'
+      ? Math.max(MIN_CONSOLE_HEIGHT, Math.round(window.innerHeight * 0.85))
+      : Number.POSITIVE_INFINITY;
+    return Math.min(max, Math.max(MIN_CONSOLE_HEIGHT, stored));
+  });
+  const resizeStateRef = useRef<{ startY: number; startHeight: number; startScrollY: number } | null>(null);
+  const resizePointerYRef = useRef(0);
+  const resizeAutoScrollRef = useRef(0);
   const [commandValue, setCommandValue] = useState('');
   const [commandSending, setCommandSending] = useState(false);
   const [commandHistory, setCommandHistory] = useState<string[]>([]);
@@ -164,7 +183,7 @@ export function ServerConsoleTabs({
       cancelAnimationFrame(finalizeFrameId);
       scrollFlagRef.current = false;
     };
-  }, [activeTab, isCLIConsoleActive, isMinimized]);
+  }, [activeTab, isCLIConsoleActive, isMinimized, isFullscreen]);
 
   useEffect(() => {
     const validTabs = new Set(['cli-console', ...openTabs]);
@@ -379,6 +398,8 @@ export function ServerConsoleTabs({
 
   const handleSendCommand = async () => {
     if (!activeTab || !commandValue.trim() || commandSending) return;
+    // External images have no console script — the backend returns 501, so never call it.
+    if (activeServer?.provider === 'external') return;
     const cmd = commandValue.trim();
     setCommandHistory((prev) => [cmd, ...prev].slice(0, 100));
     setHistoryIndex(-1);
@@ -436,10 +457,96 @@ export function ServerConsoleTabs({
     }
   };
 
+  useBodyScrollLock(isFullscreen);
+
+  // Exit fullscreen with Escape.
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsFullscreen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isFullscreen]);
+
+  // Persist the resized height and keep it bounded when the window shrinks.
+  useEffect(() => {
+    try { localStorage.setItem(CONSOLE_HEIGHT_STORAGE_KEY, String(panelHeight)); } catch { /* ignore */ }
+  }, [panelHeight]);
+
+  useEffect(() => {
+    const onResize = () => setPanelHeight((h) => clampConsoleHeight(h));
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  useEffect(() => () => cancelAnimationFrame(resizeAutoScrollRef.current), []);
+
+  function clampConsoleHeight(height: number): number {
+    const max = Math.max(MIN_CONSOLE_HEIGHT, Math.round(window.innerHeight * 0.85));
+    return Math.min(max, Math.max(MIN_CONSOLE_HEIGHT, height));
+  }
+
+  // Height follows both the pointer and the page scroll, so growing the panel
+  // past the fold keeps working once the page auto-scrolls under the cursor.
+  const resizeHeightFor = (clientY: number): number => {
+    const state = resizeStateRef.current;
+    if (!state) return panelHeight;
+    const delta = (clientY - state.startY) + (window.scrollY - state.startScrollY);
+    return clampConsoleHeight(state.startHeight + delta);
+  };
+
+  // While dragging near a viewport edge, keep scrolling the page so the handle
+  // can follow the pointer instead of getting stuck at the fold.
+  const runResizeAutoScroll = () => {
+    if (!resizeStateRef.current) return;
+    const y = resizePointerYRef.current;
+    const edge = 48;
+    const speed = 14;
+    let dy = 0;
+    if (y > window.innerHeight - edge) dy = speed;
+    else if (y < edge) dy = -speed;
+    if (dy !== 0) {
+      window.scrollBy(0, dy);
+      setPanelHeight(resizeHeightFor(y));
+    }
+    resizeAutoScrollRef.current = requestAnimationFrame(runResizeAutoScroll);
+  };
+
+  const handleResizePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (isFullscreen) return;
+    e.preventDefault();
+    resizeStateRef.current = { startY: e.clientY, startHeight: panelHeight, startScrollY: window.scrollY };
+    resizePointerYRef.current = e.clientY;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    document.body.style.userSelect = 'none';
+    resizeAutoScrollRef.current = requestAnimationFrame(runResizeAutoScroll);
+  };
+
+  const handleResizePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!resizeStateRef.current) return;
+    resizePointerYRef.current = e.clientY;
+    setPanelHeight(resizeHeightFor(e.clientY));
+  };
+
+  const handleResizePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!resizeStateRef.current) return;
+    resizeStateRef.current = null;
+    cancelAnimationFrame(resizeAutoScrollRef.current);
+    try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+    document.body.style.userSelect = '';
+  };
+
   return (
-    <div className={`gp-console-panel ${cardBg} rounded-lg border ${borderColor} shadow-lg overflow-hidden`}>
+    <div
+      className={`gp-console-panel ${cardBg} overflow-hidden ${
+        isFullscreen
+          ? 'fixed inset-0 z-[70] flex flex-col rounded-none border-0 shadow-none'
+          : `rounded-lg border ${borderColor} shadow-lg`
+      }`}
+    >
       <div
-        className={`flex min-h-[44px] items-stretch justify-between border-b ${borderColor} rounded-t-lg overflow-hidden bg-gp-surface-input`}
+        className={`flex min-h-[44px] shrink-0 items-stretch justify-between border-b ${borderColor} ${isFullscreen ? '' : 'rounded-t-lg'} overflow-hidden bg-gp-surface-input`}
       >
         <div className="flex min-w-0 flex-1 items-stretch overflow-x-auto hide-scrollbar">
           <div
@@ -533,11 +640,23 @@ export function ServerConsoleTabs({
             <Trash2 className="w-3 h-3" />
             <span className="hidden sm:inline">Clear</span>
           </AppButton>
+          <AppButton
+            tone="ghost"
+            onClick={() => setIsFullscreen((v) => !v)}
+            aria-label={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+            className={`inline-flex h-8 items-center gap-2 px-2 sm:px-3 rounded ${tabHoverBg} transition-colors ${textSecondary} hover:text-[var(--color-cyan-400)] text-sm`}
+          >
+            {isFullscreen ? <Minimize2 className="w-3 h-3" /> : <Maximize2 className="w-3 h-3" />}
+            <span className="hidden sm:inline">{isFullscreen ? 'Reduce' : 'Full screen'}</span>
+          </AppButton>
         </div>
       </div>
 
       {!isMinimized && activeTab && (
-        <div className="flex flex-col h-[400px] min-h-0">
+        <div
+          className={`flex flex-col min-h-0 ${isFullscreen ? 'flex-1' : ''}`}
+          style={isFullscreen ? undefined : { height: panelHeight }}
+        >
           {isCLIConsoleActive && (
             <>
               <div className="gp-console-terminal-wrapper relative flex-1 min-h-0">
@@ -625,22 +744,24 @@ export function ServerConsoleTabs({
                       <p>No logs yet. Execute an action to see logs.</p>
                     </div>
                   ) : (
-                    activeLogs.map((log) => (
-                      <div
-                        key={log.id}
-                        className="mb-1 flex items-start gap-2 rounded px-1 leading-5 hover:bg-white/5"
-                      >
-                        {showTimestamps && (
-                          <span className="shrink-0 text-gray-500">
-                            [{formatLogDateTime(log.timestamp)}]
-                          </span>
-                        )}
-                        <AnsiLine
-                          className={`m-0 inline-block min-w-max flex-none whitespace-pre font-mono text-sm ${getLogColor(log.type)}`}
-                          message={log.message}
-                        />
-                      </div>
-                    ))
+                    <Fragment key={activeTab}>
+                      {activeLogs.map((log) => (
+                        <div
+                          key={log.id}
+                          className="mb-1 flex items-start gap-2 rounded px-1 leading-5 hover:bg-white/5"
+                        >
+                          {showTimestamps && (
+                            <span className="shrink-0 text-gray-500">
+                              [{formatLogDateTime(log.timestamp)}]
+                            </span>
+                          )}
+                          <AnsiLine
+                            className={`m-0 inline-block min-w-max flex-none whitespace-pre font-mono text-sm ${getLogColor(log.type)}`}
+                            message={log.message}
+                          />
+                        </div>
+                      ))}
+                    </Fragment>
                   )}
                 </div>
 
@@ -657,13 +778,17 @@ export function ServerConsoleTabs({
               </div>
               {(() => {
                 const canSend = canSendCommandByServer?.[activeServer.id] ?? false;
-                const isStopped = activeServer.status === 'stopped';
-                const isInputDisabled = commandSending || !canSend || isStopped;
-                const inputPlaceholder = isStopped
-                  ? 'The server is stopped. Start it to send commands.'
-                  : canSend
-                    ? 'Type a command and press Enter…'
-                    : 'No permission to send commands';
+                const isStopped = isServerDownLike(activeServer.status);
+                // External images have no console script (backend returns 501) — disable input.
+                const isExternal = activeServer.provider === 'external';
+                const isInputDisabled = commandSending || !canSend || isStopped || isExternal;
+                const inputPlaceholder = isExternal
+                  ? 'Console commands are not available for custom (external) images.'
+                  : isStopped
+                    ? 'The server is stopped. Start it to send commands.'
+                    : canSend
+                      ? 'Type a command and press Enter…'
+                      : 'No permission to send commands';
                 return (
                   <div className={`shrink-0 flex items-center gap-2 border-t ${borderColor} bg-[#0d1117] px-4 py-2.5`}>
                     <span className="shrink-0 select-none font-mono text-sm font-bold text-[var(--color-cyan-400)]">
@@ -685,7 +810,7 @@ export function ServerConsoleTabs({
                     />
                     <button
                       onClick={() => void handleSendCommand()}
-                      disabled={commandSending || !commandValue.trim() || !canSend}
+                      disabled={commandSending || !commandValue.trim() || !canSend || isExternal}
                       title="Send command (Enter)"
                       className="shrink-0 rounded p-1.5 text-gray-600 transition-colors hover:bg-[var(--color-cyan-400)]/10 hover:text-[var(--color-cyan-400)] disabled:cursor-not-allowed disabled:opacity-30"
                     >
@@ -697,6 +822,21 @@ export function ServerConsoleTabs({
             </>
           )}
 
+        </div>
+      )}
+
+      {!isFullscreen && activeTab && (
+        <div
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Resize console"
+          onPointerDown={handleResizePointerDown}
+          onPointerMove={handleResizePointerMove}
+          onPointerUp={handleResizePointerUp}
+          onPointerCancel={handleResizePointerUp}
+          className="group flex h-2.5 w-full shrink-0 cursor-row-resize touch-none select-none items-center justify-center border-t border-gray-700 bg-gp-surface-input"
+        >
+          <div className="h-1 w-10 rounded-full bg-gray-600 transition-colors group-hover:bg-[var(--color-cyan-400)]" />
         </div>
       )}
     </div>

@@ -9,6 +9,7 @@ This directory holds the Docker image sources maintained alongside OVHcloud Game
 | Minecraft | `minecraft/` | Minecraft Java and Bedrock server runtimes. |
 | Hytale | `hytale/` | Runtime image for prepared Hytale dedicated server files. |
 | Counter-Strike 2 | `counter-strike/2/` | CS2 dedicated server runtime with optional framework support. |
+| Palworld | `palworld/` | Palworld dedicated server runtime. |
 
 ## 🛠️ Game Panel images
 
@@ -30,19 +31,21 @@ Game server images follow the same general conventions:
 
 ## ✅ Capability summary
 
-| Image family | Console commands | Backups | Restores | Notes |
-| --- | --- | --- | --- | --- |
-| Minecraft Java | Supported | Supported | Supported | Vanilla, Paper, Fabric, and NeoForge variants. |
-| Minecraft Bedrock | Supported | Supported | Supported | Uses the official Bedrock server archive supplied at runtime. |
-| Hytale | Supported | Supported | Supported | Requires prepared Hytale server files before startup. |
-| Counter-Strike 2 | Supported | Not supported | Not supported | Includes MetaMod and CounterStrikeSharp helper scripts. |
+| Image family | Console commands | Backups | Restores | Mods | Notes |
+| --- | --- | --- | --- | --- | --- |
+| Minecraft Java | Supported | Supported | Supported | Paper: plugins; Fabric/NeoForge: mods | Vanilla, Paper, Fabric, and NeoForge variants. |
+| Minecraft Bedrock | Supported | Supported | Supported | Not supported | Uses the official Bedrock server archive supplied at runtime. |
+| Hytale | Supported | Supported | Supported | Supported | Requires prepared Hytale server files before startup. |
+| Counter-Strike 2 | Supported | Not supported | Not supported | Frameworks (MetaMod + CounterStrikeSharp) | Includes MetaMod and CounterStrikeSharp helper scripts. |
+| Palworld | Supported (REST API) | Native (game-managed) | Supported | Not supported | Steam app id 2394010; on-demand save via REST. |
 
 ## 📚 Documentation
 
-- [⛏️ Minecraft images](minecraft/README.md)
-- [🗡️ Hytale image](hytale/README.md)
-- [🔫 Counter-Strike 2 image](counter-strike/2/README.md)
-- [🔄 Game Panel Updater image](gamepanel/updater/README.md)
+- [Minecraft images](minecraft/README.md)
+- [Hytale image](hytale/README.md)
+- [Counter-Strike 2 image](counter-strike/2/README.md)
+- [Palworld image](palworld/README.md)
+- [Game Panel Updater image](gamepanel/updater/README.md)
 
 ## 📝 Notes
 

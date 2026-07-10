@@ -127,6 +127,11 @@ jobs:
             "docker-images/counter-strike/2/Dockerfile"
 
           build_image \
+            "gamepanel-palworld" \
+            "docker-images/palworld" \
+            "docker-images/palworld/Dockerfile"
+
+          build_image \
             "gamepanel-hytale-java25" \
             "docker-images/hytale" \
             "docker-images/hytale/Dockerfile"
@@ -241,6 +246,12 @@ jobs:
         uses: actions/dockerPush
         with:
           image: game-panel/gamepanel-counter-strike-2:${{ cds.version }}
+          tags: "${{ cds.version }}"
+
+      - id: push-gamepanel-palworld
+        uses: actions/dockerPush
+        with:
+          image: game-panel/gamepanel-palworld:${{ cds.version }}
           tags: "${{ cds.version }}"
 
       - id: push-gamepanel-hytale-java25

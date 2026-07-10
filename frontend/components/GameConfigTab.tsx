@@ -4,6 +4,7 @@ import { apiClient } from '../utils/api';
 import { GameConfigAdvancedLinks } from './serverSettings/GameConfigAdvancedLinks';
 import { MinecraftSections, type MinecraftSectionsProps } from './serverSettings/MinecraftTab';
 import { HytaleSections, type HytaleSectionsProps } from './serverSettings/HytaleTab';
+import { PalworldSections, type PalworldSectionsProps } from './serverSettings/PalworldTab';
 import { CS2Sections, type CS2SectionsProps } from './serverSettings/CS2ConfigTab';
 import { AppButton, AppInput, AppSelect, AppSlider, AppToggle } from '../src/ui/components';
 import {
@@ -40,6 +41,7 @@ interface GameConfigTabProps {
   onOpenFileManagerPath?: (path: string) => void;
   minecraftProps?: MinecraftSectionsProps | null;
   hytaleProps?: HytaleSectionsProps | null;
+  palworldProps?: PalworldSectionsProps | null;
   cs2Props?: CS2SectionsProps | null;
   ovhcloudConfigFiles?: string[];
 }
@@ -155,6 +157,7 @@ export function GameConfigTab({
   onOpenFileManagerPath,
   minecraftProps,
   hytaleProps,
+  palworldProps,
   cs2Props,
   ovhcloudConfigFiles,
 }: GameConfigTabProps) {
@@ -677,7 +680,7 @@ export function GameConfigTab({
   const borderColor = 'border-gray-700';
   const textPrimary = 'text-white';
   const textSecondary = 'text-gray-400';
-  const hasGameConfiguration = detectedConfigFiles.length > 0 || verifiedConfigFiles.length > 0 || Boolean(minecraftProps) || Boolean(hytaleProps) || Boolean(cs2Props);
+  const hasGameConfiguration = detectedConfigFiles.length > 0 || verifiedConfigFiles.length > 0 || Boolean(minecraftProps) || Boolean(hytaleProps) || Boolean(palworldProps) || Boolean(cs2Props);
   const showSaveSuccessToast = Boolean(saveSuccessMessage && !configChanged);
   const showBottomStatusPanel = Boolean(saveError);
 
@@ -974,13 +977,31 @@ export function GameConfigTab({
             </div>
           )}
 
+          {palworldProps && (
+            <div className="px-1 sm:px-2">
+              <PalworldSections
+                {...palworldProps}
+                advancedLinksNode={
+                  <GameConfigAdvancedLinks
+                    configFiles={detectedConfigFiles}
+                    isLoading={configFilesLoading}
+                    error={configFilesError}
+                    canReadFileManager={canReadFileManager}
+                    canWriteFileManager={canWriteFileManager}
+                    onOpenFileManagerPath={openFileInFileManager}
+                  />
+                }
+              />
+            </div>
+          )}
+
           {cs2Props && (
             <div className="px-1 sm:px-2">
               <CS2Sections {...cs2Props} />
             </div>
           )}
 
-          {!minecraftProps && !hytaleProps && !cs2Props && (
+          {!minecraftProps && !hytaleProps && !palworldProps && !cs2Props && (
             <GameConfigAdvancedLinks
               configFiles={detectedConfigFiles}
               isLoading={configFilesLoading}

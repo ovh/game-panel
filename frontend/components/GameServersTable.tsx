@@ -5,12 +5,11 @@ import { ConfirmationModal } from './ConfirmationModal';
 import type { AuthUser } from '../utils/permissions';
 import { apiClient, PUBLIC_CONNECTION_HOST } from '../utils/api';
 import {
-  isServerRunningStatus,
+  isServerUpLike,
   type ServerHistoryEntry,
   type ServerMetricHistoryPoint,
 } from '../utils/serverRuntime';
-// Lazily loaded: the metric-history dialog pulls in recharts. Deferred until the user
-// first opens a connection/metric/history dialog, keeping recharts off initial load.
+// Lazily loaded so recharts (pulled in by the metric-history dialog) stays off initial load.
 const GameServersTableDialogs = lazy(() =>
   import('./gameServersTable/GameServersTableDialogs').then((m) => ({
     default: m.GameServersTableDialogs,
@@ -164,14 +163,11 @@ export function GameServersTable({
     }
   };
 
-  // Precompute the human-readable game label once per server (parsing provider metadata
-  // at most once each) so the sort/filter comparators below are cheap O(1) lookups
-  // instead of re-running JSON.parse on every comparison during a sort.
+  // Precompute the game label once per server so sort/filter comparators don't re-parse metadata.
   const gameLabelById = useMemo(() => {
     const map = new Map<GameServer['id'], string>();
     servers.forEach((server) => {
-      // Prefer the human-readable game name carried in provider metadata
-      // (e.g. LinuxGSM exposes "gamename" while server.game is only the shortname).
+      // Prefer the human-readable "gamename" from provider metadata over the shortname.
       let label = gameNamesByKey[server.game] || server.game;
       if (server.providerMetadataJson) {
         try {
@@ -192,7 +188,7 @@ export function GameServersTable({
     gameLabelById.get(server.id) ?? (gameNamesByKey[server.game] || server.game);
 
   const openMetricModal = (server: GameServer, metric: MetricType) => {
-    if (!isServerRunningStatus(server.status)) return;
+    if (!isServerUpLike(server.status)) return;
     setMetricModal({ isOpen: true, serverId: server.id, metric });
     setMetricZoom(100);
     setMetricOffset(0);
@@ -547,8 +543,7 @@ export function GameServersTable({
           : 'Network';
   const canOpenInstallModal = Boolean(onOpenInstallModal) && canInstall;
 
-  // Mount the (lazy, recharts-bearing) dialogs only once a dialog is first opened, then
-  // keep them mounted so close transitions still play. Guarded so it flips at most once.
+  // Mount the lazy dialogs on first open, then keep them mounted so close transitions still play.
   const anyDialogOpen =
     metricModal.isOpen || historyModal.isOpen || Boolean(selectedConnectionServer);
   const [dialogsMounted, setDialogsMounted] = useState(false);

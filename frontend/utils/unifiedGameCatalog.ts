@@ -27,9 +27,15 @@ export const OVH_UNIFIED: OvhUnifiedEntry[] = [
     hasVersionSelection: false,
     images: OVHCLOUD_IMAGES.filter(img => img.family === 'hytale'),
   },
+  {
+    id: 'palworld',
+    displayName: 'Palworld',
+    hasVersionSelection: false,
+    images: OVHCLOUD_IMAGES.filter(img => img.family === 'palworld'),
+  },
 ];
 
-const LGSM_SUPPRESS_SHORTNAMES = new Set(['cs2', 'mc', 'mcb', 'pmc']);
+const LGSM_SUPPRESS_SHORTNAMES = new Set(['cs2', 'mc', 'mcb', 'pmc', 'pw']);
 
 export function filterLgsmForUnified(games: LinuxGsmGame[]): LinuxGsmGame[] {
   return games.filter(g => !LGSM_SUPPRESS_SHORTNAMES.has(g.shortname));

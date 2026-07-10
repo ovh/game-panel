@@ -8,7 +8,7 @@ export interface OvhcloudPort {
 export interface OvhcloudImage {
   imageId: string;
   name: string;
-  family: 'minecraft' | 'counter-strike' | 'hytale';
+  family: 'minecraft' | 'counter-strike' | 'hytale' | 'palworld';
   dockerImage: string;
   defaultTcpPorts: OvhcloudPort[];
   defaultUdpPorts: OvhcloudPort[];
@@ -133,9 +133,9 @@ export const OVHCLOUD_IMAGES: OvhcloudImage[] = [
     name: 'Counter-Strike 2',
     family: 'counter-strike',
     dockerImage: ovhImage('gamepanel-counter-strike-2'),
-    defaultTcpPorts: [{ port: 27015, label: 'Game' }],
+    defaultTcpPorts: [{ port: 27015, label: 'RCON' }],
     defaultUdpPorts: [{ port: 27015, label: 'Game' }],
-    defaultEnv: { CS2_START_PARAMS: '+game_type 0 +game_mode 0 +map de_dust2' },
+    defaultEnv: { CS2_START_PARAMS: '+game_type 0 +game_mode 0 +map de_dust2', CS2_UPDATE_ON_START: 'true' },
     requiredEnvKeys: [],
     supportsHytaleOptions: false,
   },
@@ -151,6 +151,22 @@ export const OVHCLOUD_IMAGES: OvhcloudImage[] = [
     defaultEnv: { JAVA_XMX: '6G' },
     requiredEnvKeys: [],
     supportsHytaleOptions: true,
+  },
+
+  // --- Palworld ---
+  {
+    imageId: 'palworld',
+    name: 'Palworld',
+    family: 'palworld',
+    dockerImage: ovhImage('gamepanel-palworld'),
+    defaultTcpPorts: [],
+    defaultUdpPorts: [
+      { port: 8211, label: 'Game' },
+      { port: 27015, label: 'Steam Query' },
+    ],
+    defaultEnv: { PALWORLD_UPDATE_ON_START: 'false' },
+    requiredEnvKeys: [],
+    supportsHytaleOptions: false,
   },
 ];
 

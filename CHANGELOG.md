@@ -1,5 +1,30 @@
 # 📋 Changelog
 
+## v1.1.0 — 2026-07-10
+
+Adds **Palworld** support, improves live logs and server status tracking, and reworks the per-game configuration UI.
+
+### ✨ Added
+
+- **Palworld** — new OVHcloud game server image with full panel integration: installation, game settings (with a generated admin password), console commands, backups & restore, and Advanced Configuration links (`PalWorldSettings.ini`).
+- **"Update on start" toggle** for Steam-based games (Counter-Strike 2 and Palworld): optionally run a SteamCMD update on every start (backed by an environment variable).
+- **Resizable console** — drag the bottom handle to grow or shrink the console (height persisted across sessions), plus a fullscreen mode to view logs on the whole screen.
+- GitHub issue templates for the project.
+
+### 🔧 Changed
+
+- **Live logs** are more reliable: the stream now auto-reattaches after a container restart, replays the recent backlog, and no longer mixes logs between servers/tabs.
+- **Server status & health** reporting is more accurate and deterministic: `unhealthy` / `failed` states are shown distinctly instead of collapsing to "stopped", and install lifecycle/health tracking was hardened (Hytale now requires its UDP game port to be bound, not just the process).
+- **Game settings UI** is unified across OVHcloud games (Minecraft / Hytale / Palworld) through a shared settings section with family-based detection; saving is scoped to environment variables (Save / Save & Restart).
+- Console command input is disabled for images without a console (external images), consistent with the backend.
+- Port labels clarified (Counter-Strike 2: "RCON" on TCP 27015; Palworld: "Steam Query" on UDP 27015).
+
+### 🐛 Fixed
+
+- Steam-based game installs (Counter-Strike 2, Palworld) now retry automatically on the transient SteamCMD "Missing configuration" error, so first-time installs no longer fail intermittently.
+- Hytale installation progress bar is now proportional to the number of install steps.
+- Various UI fixes (Advanced Settings opens only on config errors, boolean settings row layout, light-mode button label) and minor fixes.
+
 ## v1.0.0 — 2026-06-30
 
 Stable release of OVHcloud Game Panel with a broader provider model, curated OVHcloud Docker images, improved file management, scheduled tasks, and container configuration workflows.

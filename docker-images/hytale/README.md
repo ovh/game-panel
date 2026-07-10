@@ -1,4 +1,4 @@
-# 🗡️ Hytale Docker Image
+# Hytale Docker Image
 
 This directory contains the Hytale game server runtime image used by OVHcloud Game Panel.
 
@@ -9,9 +9,11 @@ The Hytale image is a runtime image. It expects the Hytale server files to be pr
 | Capability | Support |
 | --- | --- |
 | Console commands | Supported |
-| Backups | Supported |
+| Hot backup while running | Native (game-managed) + on-demand save |
+| Cold backup while stopped | Not supported |
 | Restores | Supported |
 | Health check | Supported |
+| Mods | Supported (drop-in, server-side) |
 | Persistent data | `/data` |
 | Default game port | `5520/udp` |
 
@@ -31,12 +33,17 @@ The image checks that the required game files are present before starting the se
 
 ## 🔧 Runtime inputs
 
-Important inputs include:
+Boolean inputs accept `true` / `false` (and `1`, `yes`, `on` / `0`, `no`, `off`), case-insensitive.
 
-| Input | Purpose |
-| --- | --- |
-| `HYTALE_VERSION` | Hytale server version used for runtime metadata. |
-| `JAVA_XMS`, `JAVA_XMX` | Optional Java memory settings. |
+| Input | Default | Allowed values | Purpose |
+| --- | --- | --- | --- |
+| `HYTALE_VERSION` | *(from prepared files)* | version string | Hytale server version used for runtime metadata. |
+| `JAVA_XMS` | *(unset)* | e.g. `2G`, `2048M` | Initial JVM heap size. |
+| `JAVA_XMX` | *(unset)* | e.g. `4G`, `4096M` | Maximum JVM heap size. |
+| `HYTALE_START_PARAMS` | *(empty)* | any launch args | Extra launch arguments passed to the server. |
+| `HEALTHCHECK_PORT` | `5520` | `1024`–`65535` | UDP game port the health check expects the server to bind. |
+| `HEALTHCHECK_REQUIRE_BIND` | `true` | boolean | Require the UDP game port to be bound for the container to be healthy. |
+| `STOP_TIMEOUT_SECONDS` | `60` | integer seconds | Grace period before the server is force-killed on stop. |
 
 Authentication is configured through Hytale `config.json` with an `AuthCredentialStore` entry managed by the Game Panel backend. The credential store file is persisted under `/data/.gamepanel/hytale-credential-store.json`.
 
@@ -49,3 +56,9 @@ Authentication is configured through Hytale `config.json` with an `AuthCredentia
 | `/app/healthcheck.sh` | Reports container health to Docker. |
 
 Hytale backups are native `.zip` archives stored under the Hytale server backup directory. Restore operations are limited to Hytale universe data.
+
+## 🧩 Mods
+
+Hytale mods are drop-in files placed under the server mods directory (`/data/game/Server/mods`). The
+image also installs the Game Panel credential-store plugin there at startup. A restart is required
+for mod changes to take effect.

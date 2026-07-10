@@ -28,6 +28,7 @@ LABEL org.opencontainers.image.title="Hytale Server Image" \
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates \
+      iproute2 \
       jq \
       zip \
       unzip \

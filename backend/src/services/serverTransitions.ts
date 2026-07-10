@@ -22,7 +22,7 @@ interface ActiveServerTransition {
 
 const HEALTH_POLL_INTERVAL_MS = 5_000;
 
-export const INSTALL_TRANSITION_TIMEOUT_MS = 8 * 60_000;
+export const INSTALL_TRANSITION_TIMEOUT_MS = 60 * 60_000;
 export const POWER_TRANSITION_TIMEOUT_MS = 3 * 60_000;
 export const RESTART_HEALTH_POLL_DELAY_MS = 15_000;
 
@@ -61,26 +61,57 @@ async function monitorTransitionHealth(serverId: number, expectedStatus: Transit
         return;
     }
 
-    const runtime = await inspectServerRuntime(serverId);
-    if (runtime?.healthStatus !== 'healthy') {
+    if (transition.status === 'stopping') {
         return;
     }
 
-    await completeServerTransition(serverId, 'running');
+    const runtime = await inspectServerRuntime(serverId);
+    if (!runtime) {
+        return;
+    }
+
+    if (runtime.containerStatus !== 'running') {
+        await completeServerTransition(serverId, 'stopped');
+        return;
+    }
+
+    if (runtime.healthStatus === 'healthy' || runtime.healthStatus === 'none') {
+        await completeServerTransition(serverId, 'running');
+        return;
+    }
+
+    if (runtime.healthStatus === 'unhealthy') {
+        await completeServerTransition(serverId, 'unhealthy');
+        return;
+    }
 }
 
 async function handleTransitionTimeout(serverId: number): Promise<void> {
     const transition = activeTransitions.get(serverId);
     if (!transition) return;
 
+    const timedOutStatus = transition.status;
     clearTransitionHandles(serverId);
 
     try {
+        if (timedOutStatus === 'installing') {
+            const runtime = await inspectServerRuntime(serverId);
+            if (
+                runtime &&
+                runtime.containerStatus === 'running' &&
+                runtime.healthStatus !== 'healthy' &&
+                runtime.healthStatus !== 'none'
+            ) {
+                await completeServerTransition(serverId, 'unhealthy');
+                return;
+            }
+        }
+
         await reconcileServerStatus(serverId);
     } catch (error) {
         logError('SERVICE:SERVER_TRANSITION:TIMEOUT', error, {
             serverId,
-            status: transition.status,
+            status: timedOutStatus,
         });
     }
 }
@@ -113,10 +144,6 @@ export async function beginServerTransition(
 ): Promise<void> {
     clearTransitionHandles(serverId);
 
-    if (opts.writeStatus !== false) {
-        await serverRepository.updateStatus(serverId, status);
-    }
-
     const timeoutHandle = setTimeout(() => {
         void handleTransitionTimeout(serverId);
     }, opts.timeoutMs);
@@ -129,6 +156,10 @@ export async function beginServerTransition(
         healthPollStartHandle: null,
         healthPollHandle: null,
     });
+
+    if (opts.writeStatus !== false) {
+        await serverRepository.updateStatus(serverId, status);
+    }
 
     let healthPollStartHandle: NodeJS.Timeout | null = null;
     let healthPollHandle: NodeJS.Timeout | null = null;
@@ -184,7 +215,7 @@ export function shouldIgnoreDockerHealthStatus(
         return true;
     }
 
-    return healthStatus !== 'healthy';
+    return healthStatus === 'starting';
 }
 
 export function mapDockerHealthToServerStatus(
@@ -193,6 +224,10 @@ export function mapDockerHealthToServerStatus(
 ): ServerStatus {
     if (healthStatus === 'healthy') {
         return 'running';
+    }
+
+    if (healthStatus === 'starting') {
+        return 'starting';
     }
 
     return 'unhealthy';
@@ -212,12 +247,11 @@ function mapRuntimeToServerStatus(params: {
         return 'running';
     }
 
-    if (
-        params.healthStatus === 'starting' &&
-        params.activeTransitionStatus &&
-        params.currentStatus === params.activeTransitionStatus
-    ) {
-        return params.currentStatus;
+    if (params.healthStatus === 'starting') {
+        if (params.activeTransitionStatus && params.currentStatus === params.activeTransitionStatus) {
+            return params.currentStatus;
+        }
+        return 'starting';
     }
 
     return 'unhealthy';

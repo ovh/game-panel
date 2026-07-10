@@ -15,18 +15,19 @@ import { ConfirmationModal } from '../ConfirmationModal';
 import { ChangePasswordModal } from '../ChangePasswordModal';
 import { AppPageLayout } from '../../src/ui/layout';
 
-// Lazily loaded so recharts (charts library) is only fetched when the Host Status
-// page is opened, not on initial app load.
+// Lazy-loaded so recharts is only fetched when Host Status opens.
 const HostStatus = lazy(() => import('../HostStatus').then((m) => ({ default: m.HostStatus })));
 import type { CLIMessage } from '../../types/cli';
 import type { GameServer, InstallInteraction, InstallStep } from '../../types/gameServer';
 import type { AuthUser } from '../../utils/permissions';
 import type { InstallGameHandlerPayload } from './appActionHandlers';
 import type {
+  LogEntry,
   ServerHistoryById,
   ServerLogs,
   ServerMetricHistoryPoint,
 } from '../../utils/serverRuntime';
+import { nextId } from '../../utils/uid';
 import type { ActiveLogPromptToast, ConsoleTerminalTarget } from './appRuntime';
 import { AppButton } from '../../src/ui/components';
 
@@ -69,6 +70,7 @@ interface AppShellProps {
   handleClearInstallError: () => void;
   openInstallLogs: (serverId: number) => void;
   serverLogs: ServerLogs;
+  onAppendServerLog: (serverId: string, log: LogEntry) => void;
   cliMessages: CLIMessage[];
   handleClearServerLogs: (serverId: string) => void;
   handleClearCLI: () => void;
@@ -126,6 +128,7 @@ export function AppShell({
   handleClearInstallError,
   openInstallLogs,
   serverLogs,
+  onAppendServerLog,
   cliMessages,
   handleClearServerLogs,
   handleClearCLI,
@@ -155,7 +158,27 @@ export function AppShell({
   }
 
   const handleSendConsoleCommand = async (serverId: string, command: string) => {
-    await apiClient.sendConsoleCommand(Number(serverId), command);
+    const result = await apiClient.sendConsoleCommand(Number(serverId), command);
+
+    // Some consoles (e.g. Palworld's REST API) return read-command output only in
+    // the HTTP response, never in the logs stream. Surface stdout/stderr in the
+    // console so it isn't lost. Pretty-print JSON payloads when possible.
+    const prettify = (raw: string) => {
+      try { return JSON.stringify(JSON.parse(raw), null, 2); } catch { return raw; }
+    };
+    const appendOutput = (message: string, type: LogEntry['type']) => {
+      onAppendServerLog(serverId, {
+        id: nextId(),
+        timestamp: new Date().toISOString(),
+        type,
+        message,
+      });
+    };
+
+    const stdout = (result?.stdout ?? '').trim();
+    const stderr = (result?.stderr ?? '').trim();
+    if (stdout) appendOutput(prettify(stdout), result?.ok ? 'info' : 'warning');
+    if (stderr) appendOutput(stderr, 'error');
   };
 
   return (

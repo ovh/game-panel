@@ -297,8 +297,7 @@ function PasswordField({
 }
 
 // ── EnvVarsSection ─────────────────────────────────────────────────────────
-// NOTE: currently unused (no call site). Exported to keep it in the build under
-// noUnusedLocals; safe to delete entirely (with its env helpers) in a follow-up.
+// Currently unused; exported to satisfy noUnusedLocals.
 export function EnvVarsSection({
   serverId, fullEnv, canEdit, borderColor, contentBg, textPrimary, textSecondary, inputBg, inputBorder, onRefreshRequested,
 }: {
@@ -461,10 +460,7 @@ export interface CS2SectionsProps {
   serverStatus?: string | null;
   canEdit: boolean;
   canWriteFrameworks: boolean;
-  /** Whether the caller holds `server.env` on this server. The CS2 "Settings"
-   *  sub-tab is stored entirely in env vars (redacted/ignored by the backend
-   *  without this permission), so it is hidden when false. The Frameworks
-   *  sub-tab is file-based and stays available. */
+  /** Whether the caller holds `server.env`; the env-backed "Settings" sub-tab is hidden when false. */
   canManageEnv: boolean;
   borderColor: string;
   contentBg: string;
@@ -489,17 +485,17 @@ export function CS2Sections({
 }: CS2SectionsProps) {
   const [fields, setFields] = useState<CS2Fields>(DEFAULT_FIELDS);
   const [vacEnabled, setVacEnabled] = useState(true);
+  const [updateOnStart, setUpdateOnStart] = useState(true);
   const [rawParams, setRawParams] = useState('');
-  const [fullEnv, setFullEnv] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<keyof CS2Fields, string>>>({});
   const rawEditingRef = useRef(false);
+  const isRunning = serverStatus === 'running';
 
-  // The env-backed "Settings" sub-tab is only offered to callers with
-  // `server.env`; Frameworks (file-based) is always available.
+  // The env-backed "Settings" sub-tab needs `server.env`; Frameworks is always available.
   const availableTabs: CS2SubTab[] = [
     ...(canManageEnv ? (['settings'] as CS2SubTab[]) : []),
     'frameworks',
@@ -518,12 +514,12 @@ export function CS2Sections({
     try {
       const server = await apiClient.getServer(serverId);
       const env = envFromServer(server);
-      setFullEnv(env);
       const raw = env['CS2_START_PARAMS'] ?? DEFAULT_CS2_START_PARAMS;
       const params = parseCs2Params(raw);
       setFields(paramsToFields(params));
       setVacEnabled(!INSECURE_RE.test(raw));
       setRawParams(raw);
+      setUpdateOnStart((env['CS2_UPDATE_ON_START'] ?? 'true') !== 'false');
     } catch (err: any) {
       setError(err?.response?.data?.error || err?.message || 'Failed to load server configuration.');
     } finally {
@@ -570,10 +566,16 @@ export function CS2Sections({
     setError(null);
     setSuccess(false);
     try {
-      const newEnv = { ...fullEnv, CS2_START_PARAMS: rawParams };
+      // Re-fetch the latest env and change only the start params, so a separate
+      // env editor (e.g. the update-on-start toggle) is not clobbered.
+      const fresh = await apiClient.getServer(serverId);
+      const newEnv = {
+        ...envFromServer(fresh),
+        CS2_START_PARAMS: rawParams,
+        CS2_UPDATE_ON_START: updateOnStart ? 'true' : 'false',
+      };
       await apiClient.updateServer(serverId, { env: newEnv });
-      await apiClient.restartServer(serverId);
-      setFullEnv(newEnv);
+      if (isRunning) await apiClient.restartServer(serverId);
       setSuccess(true);
       setTimeout(() => setSuccess(false), 4000);
     } catch (err: any) {
@@ -761,6 +763,26 @@ export function CS2Sections({
                 </div>
               </div>
 
+              {/* Updates */}
+              <div className={`${contentBg} border ${borderColor} rounded-lg p-4 sm:p-5 space-y-4`}>
+                <h4 className={`text-sm font-semibold ${textPrimary}`}>Updates</h4>
+                <div className={`flex items-center justify-between gap-4 rounded-lg border ${borderColor} p-3`}>
+                  <div className="-mb-1.5 min-w-0">
+                    <FieldLabel
+                      label="Update on start"
+                      tooltip="When enabled, the server checks for and installs game updates via SteamCMD each time it starts."
+                    />
+                  </div>
+                  <AppToggle
+                    ariaLabel="Toggle update on start"
+                    checked={updateOnStart}
+                    onChange={setUpdateOnStart}
+                    disabled={!canEdit}
+                    className="shrink-0"
+                  />
+                </div>
+              </div>
+
               {/* Feedback */}
               {error && (
                 <div className="flex items-start gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-sm text-red-400">
@@ -771,7 +793,7 @@ export function CS2Sections({
               {success && (
                 <div className="flex items-center gap-2 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-sm text-emerald-400">
                   <Check className="w-4 h-4" />
-                  Configuration saved. Server is restarting…
+                  {isRunning ? 'Configuration saved. Server is restarting…' : 'Configuration saved. It will apply on next start.'}
                 </div>
               )}
 
@@ -785,11 +807,10 @@ export function CS2Sections({
                     className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-medium disabled:opacity-60"
                   >
                     {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                    {saving ? 'Saving & Restarting…' : 'Save & Restart'}
+                    {saving ? 'Saving…' : isRunning ? 'Save & Restart' : 'Save'}
                   </AppButton>
                 </div>
               )}
-
             </>
           )}
         </div>

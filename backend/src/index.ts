@@ -4,7 +4,7 @@ import express, { type Application, type Request, type Response } from 'express'
 import helmet from 'helmet';
 import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
-import { reconcileDockerHealthToDb, startDockerHealthEventListener } from './services/dockerEvents.js';
+import { reconcileDockerHealthToDb, startDockerHealthEventListener, startPeriodicHealthReconcile } from './services/dockerEvents.js';
 import { closeDatabase, initializeDatabase } from './database/init.js';
 import { ensureRootUserExists } from './database/bootstrap.js';
 import { authMiddleware, errorHandler } from './middleware/auth.js';
@@ -45,6 +45,7 @@ if (!configuredOrigin) {
 const allowedOrigins = new Set<string>([configuredOrigin]);
 
 let dockerHealthListener: { stop: () => void } | null = null;
+let periodicHealthReconcile: { stop: () => void } | null = null;
 let linuxGsmRefreshJob: { stop: () => void } | null = null;
 let fileTransferCleanupJob: { stop: () => void } | null = null;
 let scheduledTaskRunner: { stop: () => void } | null = null;
@@ -134,6 +135,7 @@ async function startServer(): Promise<void> {
 
     // Then listen to live Docker health changes
     dockerHealthListener = startDockerHealthEventListener();
+    periodicHealthReconcile = startPeriodicHealthReconcile();
     linuxGsmRefreshJob = startLinuxGsmManifestRefreshJob();
     fileTransferCleanupJob = startFileTransferCleanupJob();
     scheduledTaskRunner = startScheduledTaskRunner();
@@ -160,6 +162,7 @@ function setupGracefulShutdown(): void {
     try {
       // 1) Stop docker listener
       dockerHealthListener?.stop();
+      periodicHealthReconcile?.stop();
       linuxGsmRefreshJob?.stop();
       fileTransferCleanupJob?.stop();
       scheduledTaskRunner?.stop();

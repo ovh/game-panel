@@ -8,9 +8,7 @@ export interface FileRoot {
   containerPath: string;
 }
 
-// Last File Manager position (root + path) per server, so reopening the File
-// Manager later lands back where the user left off instead of resetting to the
-// root. Persisted in localStorage to survive full page reloads.
+// Last File Manager position (root + path) per server, persisted in localStorage.
 const FILE_MANAGER_POSITIONS_KEY = 'gp_filemanager_positions';
 const DEFAULT_POSITION = { root: 'data', path: '/' };
 
@@ -85,9 +83,7 @@ export function useFileManagerState({ activeTab, isOpen, serverId, containerConf
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
   const [deleteMultiNames, setDeleteMultiNames] = useState<string[] | null>(null);
 
-  // When restoring a saved position whose root differs from the current one,
-  // changing the root triggers the path-reset effect below. This ref tells that
-  // effect to land on the saved path instead of resetting to '/'.
+  // Signals the path-reset effect to land on a saved path instead of resetting to '/'.
   const pendingRestoreRef = useRef<FileManagerPosition | null>(null);
 
   const loadFiles = async (path: string) => {
@@ -124,8 +120,7 @@ export function useFileManagerState({ activeTab, isOpen, serverId, containerConf
     if (saved.root === currentRoot) {
       pendingRestoreRef.current = null;
     } else {
-      // Root differs → setCurrentRoot triggers the path-reset effect; flag the
-      // restore so it lands on the saved path rather than '/'.
+      // Root differs → flag the restore so the path-reset effect keeps the saved path.
       pendingRestoreRef.current = saved;
       setCurrentRoot(saved.root);
     }
@@ -138,8 +133,7 @@ export function useFileManagerState({ activeTab, isOpen, serverId, containerConf
     setFileError(null);
     setSelectedItems([]);
     setDeleteMultiNames(null);
-    // currentRoot is read to decide whether a root change is needed, but must
-    // not retrigger this effect (that would re-restore mid-navigation).
+    // currentRoot is read but intentionally omitted from deps to avoid re-restoring mid-navigation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, serverId]);
 
@@ -157,8 +151,7 @@ export function useFileManagerState({ activeTab, isOpen, serverId, containerConf
 
   useEffect(() => {
     const pending = pendingRestoreRef.current;
-    // A restore targeting this root keeps the saved path; any other root change
-    // (user switching roots) resets to '/'.
+    // A pending restore keeps the saved path; a user root switch resets to '/'.
     const nextPath = pending && pending.root === currentRoot ? pending.path : '/';
     pendingRestoreRef.current = null;
     setCurrentPath(nextPath);

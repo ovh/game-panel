@@ -136,7 +136,7 @@ export async function installOvhcloudHytaleServer(params: {
     await dockerUtils.pullImageByName(params.spec.dockerImage);
     await assertServerExistsDuringInstall(params.serverId);
 
-    await installProgressRepository.update(params.serverId, 82, 'creating_container');
+    await installProgressRepository.update(params.serverId, 80, 'creating_container');
     const containerInfo = await dockerUtils.createContainer(
         {
             provider: params.spec.provider,

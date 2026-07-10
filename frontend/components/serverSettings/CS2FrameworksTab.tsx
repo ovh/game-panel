@@ -7,6 +7,7 @@ import {
   fetchMetamodVersions,
   type FrameworkVersion,
 } from '../../utils/frameworkCatalog';
+import { mapBackendStatusToUi } from '../../utils/serverRuntime';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -162,10 +163,10 @@ export function CS2FrameworksSection({
   textPrimary,
   textSecondary,
 }: CS2FrameworksSectionProps) {
-  // Framework install/repair stops, mutates, then restarts the server, which
-  // would disconnect connected players. The backend only allows it on a fully
-  // stopped server; mirror that here so the action is offered when it can work.
-  const isStopped = serverStatus === 'stopped';
+  // Framework install/repair restarts the server, so it is blocked while the
+  // container is active/transitioning (allowed on stopped, unhealthy, failed).
+  const FRAMEWORK_BLOCKED_STATUSES = ['creating', 'installing', 'starting', 'running', 'stopping', 'restarting'];
+  const isStopped = !FRAMEWORK_BLOCKED_STATUSES.includes(mapBackendStatusToUi(serverStatus));
   const [status, setStatus] = useState<FrameworkStatus | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);

@@ -34,12 +34,10 @@ const LEADING_ISO_TIMESTAMP_PATTERN =
 const STOPPED_BACKEND_STATUSES = new Set([
   'stopped',
   'stop',
-  'unhealthy',
   'exited',
   'dead',
   'offline',
   'error',
-  'failed',
 ]);
 
 const RUNNING_BACKEND_STATUSES = new Set(['running', 'run', 'healthy', 'online', 'up', 'started']);
@@ -51,6 +49,8 @@ const CANONICAL_SERVER_STATUSES = new Set<GameServerStatus>([
   'starting',
   'stopping',
   'restarting',
+  'unhealthy',
+  'failed',
 ]);
 // Short-lived transitions where no action makes sense (a few seconds each)
 const TRANSITION_SERVER_STATUSES = new Set<GameServerStatus>([
@@ -98,6 +98,18 @@ export function isServerTransitioningStatus(status: unknown): boolean {
   return TRANSITION_SERVER_STATUSES.has(mapBackendStatusToUi(status));
 }
 
+// "Up-like": container is running, whether healthy (`running`) or `unhealthy`.
+export function isServerUpLike(status: unknown): boolean {
+  const ui = mapBackendStatusToUi(status);
+  return ui === 'running' || ui === 'unhealthy';
+}
+
+// "Down-like": container is not running, whether cleanly `stopped` or `failed`.
+export function isServerDownLike(status: unknown): boolean {
+  const ui = mapBackendStatusToUi(status);
+  return ui === 'stopped' || ui === 'failed';
+}
+
 export function formatServerStatusLabel(status: unknown): string {
   switch (mapBackendStatusToUi(status)) {
     case 'running':
@@ -114,6 +126,10 @@ export function formatServerStatusLabel(status: unknown): string {
       return 'Stopping';
     case 'restarting':
       return 'Restarting';
+    case 'unhealthy':
+      return 'Unhealthy';
+    case 'failed':
+      return 'Failed';
     default:
       return 'Stopped';
   }

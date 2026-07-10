@@ -4,8 +4,7 @@ export const GLOBAL_OPTIONS = [
   { value: '*', label: 'Full global access (*)' },
 ];
 
-// General permissions are ordered from least to most dangerous (the filtered
-// SERVER_GENERAL_OPTIONS keeps this order for display).
+// Ordered from least to most dangerous.
 export const SERVER_CORE_OPTIONS = [
   { value: 'server.power', label: 'Start/Stop/Restart' },
   { value: 'container.logs.read', label: 'Read server logs' },
@@ -72,16 +71,18 @@ export const HYTALE_OVHCLOUD_OPTIONS = [
   { value: 'hytale.mods.write', label: 'Manage mods' },
 ];
 
-// Canonical set of per-server permissions the backend will accept for a member
-// (POST/PATCH /api/servers/:id/members). It mirrors backend/src/permissions.ts
-// minus the global-only `users.manage` / `server.install`, and must NOT contain
-// the `*` wildcard — the backend now rejects `*` and any unknown string with a
-// 400. Derived from the option arrays above so it stays in sync with the picker.
+export const PALWORLD_OVHCLOUD_OPTIONS = [
+  { value: 'palworld.settings.read', label: 'View game config' },
+  { value: 'palworld.settings.write', label: 'Edit game config' },
+];
+
+// Per-server permissions the backend accepts for a member; must not contain the `*` wildcard.
 export const ASSIGNABLE_SERVER_PERMISSIONS: string[] = [
   ...SERVER_OPTIONS,
   ...CS2_OVHCLOUD_OPTIONS,
   ...MINECRAFT_OVHCLOUD_OPTIONS,
   ...HYTALE_OVHCLOUD_OPTIONS,
+  ...PALWORLD_OVHCLOUD_OPTIONS,
 ].map((option) => option.value);
 
 export const SERVER_PRESETS = [
@@ -115,7 +116,6 @@ export const SERVER_PRESETS = [
     ],
   },
   // Full access = every assignable per-server permission, listed explicitly.
-  // (Previously this sent `['*']`, which the backend now rejects.)
   { id: 'full', label: 'Full access', permissions: [...ASSIGNABLE_SERVER_PERMISSIONS] },
 ];
 
@@ -175,19 +175,38 @@ export const HYTALE_PRESETS = [
   },
 ];
 
+export const PALWORLD_PRESETS = [
+  {
+    id: 'palworld-viewer',
+    label: 'Palworld Viewer',
+    permissions: [
+      ...BASE_VIEWER,
+      'palworld.settings.read',
+    ],
+  },
+  {
+    id: 'palworld-operator',
+    label: 'Palworld Operator',
+    permissions: [
+      ...BASE_OPERATOR,
+      'palworld.settings.read', 'palworld.settings.write',
+    ],
+  },
+];
+
 export const CS2_PRESETS = [
   {
     id: 'cs2-operator',
     label: 'CS2 Operator',
     permissions: [
-      // CS2 ne gère pas les backups : on retire backups.* du preset.
+      // CS2 has no backups.
       ...BASE_OPERATOR.filter((p) => !p.startsWith('backups.')),
       'cs2.frameworks.write',
     ],
   },
 ];
 
-export const ALL_PRESETS = [...SERVER_PRESETS, ...MINECRAFT_PRESETS, ...HYTALE_PRESETS, ...CS2_PRESETS];
+export const ALL_PRESETS = [...SERVER_PRESETS, ...MINECRAFT_PRESETS, ...HYTALE_PRESETS, ...PALWORLD_PRESETS, ...CS2_PRESETS];
 
 export const MAX_USERS = 10;
 
@@ -197,6 +216,7 @@ export const serverPresetValues = new Set([
   ...CS2_OVHCLOUD_OPTIONS.map((option) => option.value),
   ...MINECRAFT_OVHCLOUD_OPTIONS.map((option) => option.value),
   ...HYTALE_OVHCLOUD_OPTIONS.map((option) => option.value),
+  ...PALWORLD_OVHCLOUD_OPTIONS.map((option) => option.value),
   '*',
 ]);
 export function parsePermissionList(value: string): string[] {
@@ -218,11 +238,7 @@ export function stripWildcard(values: string[]): string[] {
   return values.filter((permission) => permission !== '*');
 }
 
-// Final guard before sending per-server permissions to the backend: expand any
-// legacy `*` to the explicit canonical list and drop anything that is not an
-// assignable per-server permission. The backend rejects `*` / unknown strings
-// with a 400, so this keeps stale data (e.g. members saved before this change)
-// from blocking an otherwise valid save.
+// Expand legacy `*` and drop non-assignable permissions before sending to the backend.
 export function sanitizeServerPermissions(values: string[]): string[] {
   const expanded = values.includes('*') ? [...ASSIGNABLE_SERVER_PERMISSIONS] : values;
   const assignable = new Set(ASSIGNABLE_SERVER_PERMISSIONS);
@@ -263,8 +279,7 @@ export function togglePermission(values: string[], item: string) {
 
 function hasFullServerAccess(values: string[]): boolean {
   return (
-    // `*` is only ever read here for backward-compatibility with data saved
-    // before the wildcard was removed; it is never written back.
+    // `*` is read only for backward-compat; never written back.
     values.includes('*') ||
     ASSIGNABLE_SERVER_PERMISSIONS.every((permission) => values.includes(permission))
   );
@@ -276,8 +291,7 @@ export function isServerPermissionChecked(values: string[], item: string): boole
 }
 
 export function toggleServerPermission(values: string[], item: string): string[] {
-  // Expand any legacy `*` to the explicit list first so toggling never has to
-  // reason about the wildcard, and so we never emit `*` back to the backend.
+  // Expand legacy `*` first so we never toggle against or emit the wildcard.
   const base = values.includes('*') ? [...ASSIGNABLE_SERVER_PERMISSIONS] : values;
 
   if (item === '*') {
@@ -307,7 +321,7 @@ export function samePermissionSet(a: string[], b: string[]): boolean {
 export function getAccessLevelLabel(permissions: string[]): string {
   const normalized = normalizePermissions(permissions);
   if (normalized.length === 0) return 'No access';
-  // Full access is now the explicit canonical list (legacy `*` still recognised).
+  // Full access = the explicit canonical list (legacy `*` still recognised).
   if (hasFullServerAccess(normalized)) return 'Full access';
 
   const matchedPreset = SERVER_PRESETS.find(

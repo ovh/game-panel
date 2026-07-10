@@ -40,11 +40,12 @@ export async function getContainerLogs(containerId: string, tail = 50): Promise<
 export function streamContainerLogs(
     containerId: string,
     onLine: (line: string) => void,
-    opts?: { since?: number }
+    opts?: { since?: number; onEnd?: () => void }
 ): { stop: () => void } {
     const container = docker.getContainer(containerId);
 
     let stopped = false;
+    let ended = false;
     let logStream: NodeJS.ReadableStream | null = null;
 
     const stdout = new PassThrough();
@@ -66,6 +67,16 @@ export function streamContainerLogs(
     stdout.on('data', handleChunk);
     stderr.on('data', handleChunk);
 
+    const handleStreamEnd = () => {
+        if (stopped || ended) return;
+        ended = true;
+        try {
+            opts?.onEnd?.();
+        } catch {
+            // Ignore onEnd handler errors.
+        }
+    };
+
     (async () => {
         try {
             logStream = (await container.logs({
@@ -78,8 +89,12 @@ export function streamContainerLogs(
             })) as unknown as NodeJS.ReadableStream;
 
             (docker as any).modem.demuxStream(logStream, stdout, stderr);
+
+            logStream.on('end', handleStreamEnd);
+            logStream.on('close', handleStreamEnd);
+            logStream.on('error', handleStreamEnd);
         } catch {
-            // Ignore log-stream setup errors.
+            handleStreamEnd();
         }
     })();
 

@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from 'react';
 import type { CLIMessage } from '../../types/cli';
+import { nextId } from '../../utils/uid';
 
 export function useCliMessages() {
   const [cliMessages, setCliMessages] = useState<CLIMessage[]>([]);
@@ -36,7 +37,7 @@ export function useCliMessages() {
       lastCliMessageRef.current = { key: dedupeKey, at: now };
 
       const newMessage: CLIMessage = {
-        id: now.toString(),
+        id: String(nextId()),
         timestamp: new Date().toISOString(),
         message,
         type,

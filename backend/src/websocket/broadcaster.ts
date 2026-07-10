@@ -18,6 +18,7 @@ import type {
     SystemRebootingEvent,
 } from '../types/events.js';
 import { redactServerEnv, serializeGameServerWithInstallProgress } from '../utils/apiSerialization.js';
+import { reattachLogStreamsForServer } from './subscriptions.js';
 
 interface BroadcasterCleanup {
     shutdown(): void;
@@ -69,6 +70,13 @@ export function attachBroadcaster(wss: WebSocketServer): BroadcasterCleanup {
             sendSafe(ws, { type, server: canSeeEnv ? fullServer : redactedServer, timestamp: nowIso() });
         }
     };
+    const reattachServerLogs = async (serverId: number) => {
+        try {
+            await reattachLogStreamsForServer(wss, serverId);
+        } catch (err) {
+            logError('WS:LOGS:REATTACH', err, { serverId });
+        }
+    };
 
     const onServerUpdated = async (evt: unknown) => {
         const e = evt as ServerUpdatedEvent;
@@ -79,6 +87,8 @@ export function attachBroadcaster(wss: WebSocketServer): BroadcasterCleanup {
         } catch (err) {
             logError('WS:BROADCAST:SERVERS_UPDATED', err, { serverId: e.serverId });
         }
+
+        await reattachServerLogs(e.serverId);
     };
 
     const onServerStatus = async (evt: unknown) => {
@@ -90,6 +100,8 @@ export function attachBroadcaster(wss: WebSocketServer): BroadcasterCleanup {
         } catch (err) {
             logError('WS:BROADCAST:SERVERS_STATUS', err, { serverId: e.serverId });
         }
+
+        await reattachServerLogs(e.serverId);
     };
 
     const onServerCreated = async (evt: unknown) => {

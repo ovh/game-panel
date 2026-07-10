@@ -72,7 +72,7 @@ function createDownloaderPromptWatcher(serverId: number, purpose: 'downloader', 
                 }
                 onAuthTimeout?.();
             }, DOWNLOADER_AUTH_TIMEOUT_MS);
-            await installProgressRepository.update(serverId, 25, 'hytale_downloader_auth');
+            await installProgressRepository.update(serverId, 10, 'hytale_downloader_auth');
         })();
 
         await creating;
@@ -227,7 +227,7 @@ export async function prepareGameFiles(params: {
         throw new Error(`Hytale game directory exists but ${startScript} is missing`);
     }
 
-    await installProgressRepository.update(params.serverId, 35, 'downloading_server_files');
+    await installProgressRepository.update(params.serverId, 20, 'downloading_server_files');
     const downloadArchivePath = path.join(params.paths.stateDir, `hytale-${params.patchline}.zip`);
     await runDownloaderCommand({
         serverId: params.serverId,
@@ -237,7 +237,7 @@ export async function prepareGameFiles(params: {
         timeoutMs: DOWNLOADER_DOWNLOAD_TIMEOUT_MS,
     });
 
-    await installProgressRepository.update(params.serverId, 55, 'extracting_server_files');
+    await installProgressRepository.update(params.serverId, 30, 'extracting_server_files');
     const stagingDir = path.join(params.paths.dataDir, `.game-staging-${Date.now()}`);
     await fs.rm(stagingDir, { recursive: true, force: true });
     await fs.mkdir(stagingDir, { recursive: true });

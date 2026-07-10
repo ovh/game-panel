@@ -1,0 +1,31 @@
+name: "🎮 New Game Request"
+description: Request support for a new game server.
+title: "[Game Request]: "
+labels: ["game-request"]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting a new game for the Game Panel.
+
+  - type: input
+    id: game_name
+    attributes:
+      label: Game name
+      description: Name of the game to add.
+    validations:
+      required: true
+
+  - type: input
+    id: official_website
+    attributes:
+      label: Official website or documentation
+      description: Link to the official website, Steam page or server documentation.
+      placeholder: "https://..."
+
+  - type: textarea
+    id: additional_context
+    attributes:
+      label: Additional context
+      description: Add any additional information that could help implementation.

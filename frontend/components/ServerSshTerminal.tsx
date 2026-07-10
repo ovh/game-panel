@@ -5,7 +5,7 @@ import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import { apiClient } from '../utils/api';
-import { isServerRunningStatus } from '../utils/serverRuntime';
+import { isServerUpLike } from '../utils/serverRuntime';
 
 const style = document.createElement('style');
 style.textContent = `
@@ -265,14 +265,14 @@ export function ServerSshTerminal({ serverId, serverStatus }: ServerSshTerminalP
         </div>
       )}
 
-      {serverId && !isServerRunningStatus(serverStatus) && (
+      {serverId && !isServerUpLike(serverStatus) && (
         <div className="bg-gp-surface-elevated border border-amber-500/40 rounded-lg p-5 flex items-start gap-3">
           <AlertTriangle className="w-5 h-5 text-amber-400 mt-0.5 flex-shrink-0" />
           <p className="text-sm text-amber-200">The server must be <strong>running</strong> to open a terminal session.</p>
         </div>
       )}
 
-      {serverId && isServerRunningStatus(serverStatus) && !disclaimerAccepted ? (
+      {serverId && isServerUpLike(serverStatus) && !disclaimerAccepted ? (
         <div className="bg-gp-surface-elevated border border-yellow-500/40 rounded-lg p-5">
           <div className="flex items-start gap-3">
             <AlertTriangle className="w-5 h-5 text-yellow-400 mt-0.5" />
@@ -294,7 +294,7 @@ export function ServerSshTerminal({ serverId, serverStatus }: ServerSshTerminalP
             </div>
           </div>
         </div>
-      ) : serverId && isServerRunningStatus(serverStatus) ? (
+      ) : serverId && isServerUpLike(serverStatus) ? (
         <div className="flex flex-col flex-1 min-h-0">
           {error && <div className="mb-3 text-xs text-red-300">{error}</div>}
           <div className="relative flex-1 min-h-[360px] border border-gray-700 rounded-2xl overflow-hidden bg-gp-surface-input shadow-[0_0_0_1px_rgba(17,24,39,0.6),0_20px_40px_-24px_rgba(15,23,42,0.8)]">

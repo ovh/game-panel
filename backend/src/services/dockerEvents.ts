@@ -29,8 +29,8 @@ async function applyDockerHealthStatus(serverId: number, containerId: string, he
 
     const nextStatus = mapDockerHealthToServerStatus(current.status as ServerStatus, health);
 
-    if (nextStatus === 'running') {
-        await completeServerTransition(serverId, 'running');
+    if (nextStatus === 'running' || nextStatus === 'unhealthy') {
+        await completeServerTransition(serverId, nextStatus);
         return;
     }
 
@@ -45,42 +45,31 @@ async function applyDockerContainerState(serverId: number, containerId: string):
     const state = runtime.containerStatus;
     const health = runtime.healthStatus;
 
-    if (state === 'running') {
-        if (health === 'none' || health === 'healthy') {
-            await serverRepository.updateRuntimeState(serverId, runtime);
-            await completeServerTransition(serverId, 'running');
-            return;
-        }
+    await serverRepository.updateRuntimeState(serverId, runtime);
 
-        if (health === 'starting') {
-            await serverRepository.updateRuntimeState(serverId, runtime);
-            if (shouldIgnoreDockerHealthStatus(serverId, health)) {
-                return;
-            }
-
-            await serverRepository.updateRuntimeAndStatusIfChanged(serverId, {
-                status: 'unhealthy',
-                containerStatus: runtime.containerStatus,
-                healthStatus: runtime.healthStatus,
-            });
-            return;
-        }
-
-        await serverRepository.updateRuntimeAndStatusIfChanged(serverId, {
-            status: 'unhealthy',
-            containerStatus: runtime.containerStatus,
-            healthStatus: runtime.healthStatus,
-        });
+    if (state !== 'running') {
+        await afterOvhcloudServerStopped(serverId, current).catch(() => undefined);
+        await completeServerTransition(serverId, 'stopped');
         return;
     }
 
-    await afterOvhcloudServerStopped(serverId, current).catch(() => undefined);
+    if (health === 'none' || health === 'healthy') {
+        await completeServerTransition(serverId, 'running');
+        return;
+    }
 
-    await serverRepository.updateRuntimeAndStatusIfChanged(serverId, {
-        status: 'stopped',
-        containerStatus: runtime.containerStatus,
-        healthStatus: runtime.healthStatus,
-    });
+    if (health === 'starting') {
+        if (shouldIgnoreDockerHealthStatus(serverId, health)) {
+            return;
+        }
+        if (current.status === 'creating' || current.status === 'installing') {
+            return;
+        }
+        await serverRepository.updateStatusIfChanged(serverId, 'starting');
+        return;
+    }
+
+    await completeServerTransition(serverId, 'unhealthy');
 }
 
 function safeJsonParse(line: string): any | null {
@@ -91,6 +80,20 @@ function safeJsonParse(line: string): any | null {
     }
 }
 
+
+let periodicReconcileInFlight = false;
+
+export function startPeriodicHealthReconcile(intervalMs = 20_000): { stop: () => void } {
+    const handle = setInterval(() => {
+        if (periodicReconcileInFlight) return;
+        periodicReconcileInFlight = true;
+        void reconcileDockerHealthToDb()
+            .catch((e) => logError('SERVICE:DOCKER_EVENTS:PERIODIC_RECONCILE', e))
+            .finally(() => { periodicReconcileInFlight = false; });
+    }, intervalMs);
+
+    return { stop: () => clearInterval(handle) };
+}
 
 // One-shot sync at boot: reads current container health and updates DB.
 export async function reconcileDockerHealthToDb(): Promise<void> {
@@ -159,7 +162,7 @@ export function startDockerHealthEventListener(): { stop: () => void } {
                     }
 
                     const serverId = serverIdNum;
-                    const containerId = String(evt.id ?? '');
+                    const containerId = String(evt.Actor?.ID ?? evt.id ?? '');
                     if (!containerId) continue;
 
                     try {

@@ -6,6 +6,7 @@ import {
   type ServerMetricHistoryPoint,
 } from '../../utils/serverRuntime';
 import type { GameServer, InstallInteraction, InstallStep } from '../../types/gameServer';
+import { nextId } from '../../utils/uid';
 
 interface CreateWebSocketMessageHandlerDeps {
   setGameServers: React.Dispatch<React.SetStateAction<GameServer[]>>;
@@ -225,10 +226,10 @@ export function createWebSocketMessageHandler({
 
     const normalizeLogEntries = (rawLines: unknown[]): LogEntry[] =>
       rawLines
-        .map((line, index) => {
+        .map((line) => {
           const parsedLine = extractTimestampedLogLine(line);
           return {
-            id: Date.now() + index,
+            id: nextId(),
             timestamp: parsedLine.timestamp,
             type: 'info' as const,
             message: parsedLine.message,
@@ -447,11 +448,11 @@ export function createWebSocketMessageHandler({
 
         if (Array.isArray(message.actions)) {
           const entries: ServerHistoryEntry[] = message.actions
-            .map((action: any, idx: number) =>
+            .map((action: any) =>
               normalizeHistoryEntry(
                 action,
                 action?.timestamp ?? message?.timestamp,
-                Date.now() + idx
+                nextId()
               )
             )
             .filter(
@@ -510,7 +511,7 @@ export function createWebSocketMessageHandler({
           const nextEntry = normalizeHistoryEntry(
             message.action,
             message?.timestamp ?? message?.ts,
-            Date.now()
+            nextId()
           );
           if (nextEntry) {
             addServerHistoryEntries(targetServerId, [nextEntry]);

@@ -1,7 +1,7 @@
 import type { AuthUser } from '../../utils/permissions';
 import {
   formatServerStatusLabel,
-  isServerRunningStatus,
+  isServerUpLike,
   mapBackendStatusToUi,
   type ServerHistoryEntry,
 } from '../../utils/serverRuntime';
@@ -60,16 +60,12 @@ export function canOpenServerSettings(
   _permissionsByServer: Record<string, string[]> | undefined,
   _serverId: string
 ) {
-  // The modal is always openable so every menu stays visible; each tab is
-  // greyed-out (and its content gated) when the user lacks the relevant
-  // permission. Reading per-section data is permission-gated server-side
-  // (e.g. `backups.read`, `scheduledtasks.read`), so an opener with no rights
-  // simply sees every section greyed-out.
+  // Always openable; each tab is greyed-out and gated server-side when the user lacks the permission.
   return true;
 }
 
 export function formatMetricValue(status: string, metric?: number) {
-  if (!isServerRunningStatus(status)) return '-';
+  if (!isServerUpLike(status)) return '-';
   if (metric === undefined || metric === null) return 'Loading';
   return `${metric.toFixed(2)}%`;
 }
@@ -113,6 +109,18 @@ export function getServerStatusPresentation(status: string) {
         normalizedStatus,
         label: formatServerStatusLabel(normalizedStatus),
         className: 'bg-yellow-900/40 text-yellow-300 border-yellow-500/30',
+      };
+    case 'unhealthy':
+      return {
+        normalizedStatus,
+        label: formatServerStatusLabel(normalizedStatus),
+        className: 'bg-amber-900/40 text-amber-300 border-amber-500/30',
+      };
+    case 'failed':
+      return {
+        normalizedStatus,
+        label: formatServerStatusLabel(normalizedStatus),
+        className: 'bg-rose-950/50 text-rose-300 border-rose-500/40',
       };
     case 'stopped':
     default:

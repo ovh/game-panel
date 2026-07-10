@@ -1,4 +1,4 @@
-import WebSocket from 'ws';
+import WebSocket, { type WebSocketServer } from 'ws';
 import type {
     AuthenticatedWebSocket,
     SubscriptionsState,
@@ -85,6 +85,83 @@ async function assertServerAccess(_ws: AuthenticatedWebSocket, serverId: number)
     return server;
 }
 
+export function startServerLogStream(
+    ws: AuthenticatedWebSocket,
+    serverId: number,
+    containerId: string
+): void {
+    ws.logStreams = ws.logStreams ?? {};
+
+    if (ws.logStreams[serverId]) {
+        try {
+            ws.logStreams[serverId].stop();
+        } catch {
+            // Ignore teardown errors.
+        }
+        delete ws.logStreams[serverId];
+    }
+
+    ws.logStreams[serverId] = dockerUtils.streamContainerLogs(
+        containerId,
+        (line) => {
+            if (ws.readyState !== WebSocket.OPEN) return;
+            if (!ws.subs?.logs.has(serverId)) return;
+
+            sendSafe(ws, {
+                type: 'logs:new',
+                serverId,
+                lines: [line],
+                timestamp: nowIso(),
+            });
+        },
+        {
+            onEnd: () => {
+                if (ws.logStreams?.[serverId]) delete ws.logStreams[serverId];
+            },
+        }
+    );
+}
+
+const REATTACH_LOG_HISTORY_LIMIT = 200;
+
+export async function reattachLogStreamsForServer(wss: WebSocketServer, serverId: number): Promise<void> {
+    const targets: AuthenticatedWebSocket[] = [];
+    for (const client of wss.clients) {
+        const ws = client as AuthenticatedWebSocket;
+        if (ws.readyState !== WebSocket.OPEN) continue;
+        if (!ws.userId || !ws.subs?.logs.has(serverId)) continue;
+        if (ws.logStreams?.[serverId]) continue; // already streaming live — nothing to recover
+
+        targets.push(ws);
+    }
+
+    if (targets.length === 0) return;
+
+    const server = await serverRepository.findById(serverId);
+    const containerId = server?.docker_container_id ?? null;
+
+    if (!containerId || server?.container_status !== 'running') return;
+
+    const containerLogs = await dockerUtils
+        .getContainerLogs(containerId, REATTACH_LOG_HISTORY_LIMIT)
+        .catch(() => [] as string[]);
+
+    for (const ws of targets) {
+        if (ws.readyState !== WebSocket.OPEN) continue;
+        if (!ws.subs?.logs.has(serverId)) continue;
+        if (ws.logStreams?.[serverId]) continue;
+
+        sendSafe(ws, {
+            type: 'logs:history',
+            serverId,
+            logs: containerLogs,
+            limit: REATTACH_LOG_HISTORY_LIMIT,
+            timestamp: nowIso(),
+        });
+        startServerLogStream(ws, serverId, containerId);
+    }
+}
+
 export async function handleSubscribeServers(
     ws: AuthenticatedWebSocket,
     _message?: WsSubscribeServersMessage
@@ -144,21 +221,7 @@ export async function handleSubscribeLogs(
     sendSafe(ws, { type: 'logs:subscribed', serverId, timestamp: nowIso() });
 
     if (server.docker_container_id) {
-        ws.logStreams = ws.logStreams ?? {};
-
-        if (!ws.logStreams[serverId]) {
-            ws.logStreams[serverId] = dockerUtils.streamContainerLogs(server.docker_container_id, (line) => {
-                if (ws.readyState !== WebSocket.OPEN) return;
-                if (!ws.subs?.logs.has(serverId)) return;
-
-                sendSafe(ws, {
-                    type: 'logs:new',
-                    serverId,
-                    lines: [line],
-                    timestamp: nowIso(),
-                });
-            });
-        }
+        startServerLogStream(ws, serverId, server.docker_container_id);
     }
 }
 

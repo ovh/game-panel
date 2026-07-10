@@ -81,7 +81,23 @@ install_or_update_cs2() {
 
   set -- "$@" +quit
 
-  "$@"
+  STEAMCMD_MAX_ATTEMPTS="${STEAMCMD_MAX_ATTEMPTS:-5}"
+  STEAMCMD_RETRY_DELAY_SECONDS="${STEAMCMD_RETRY_DELAY_SECONDS:-10}"
+  ATTEMPT=1
+
+  while :; do
+    if "$@"; then
+      break
+    fi
+
+    if [ "${ATTEMPT}" -ge "${STEAMCMD_MAX_ATTEMPTS}" ]; then
+      die "SteamCMD failed after ${ATTEMPT} attempt(s)."
+    fi
+
+    log "SteamCMD attempt ${ATTEMPT}/${STEAMCMD_MAX_ATTEMPTS} failed (known transient SteamCMD 'Missing configuration' error on a cold cache); retrying in ${STEAMCMD_RETRY_DELAY_SECONDS}s..."
+    ATTEMPT=$((ATTEMPT + 1))
+    sleep "${STEAMCMD_RETRY_DELAY_SECONDS}"
+  done
 }
 
 install_or_update_cs2

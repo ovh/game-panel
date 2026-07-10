@@ -1,0 +1,44 @@
+name: "✨ Feature Request"
+description: Suggest an improvement or a new feature for the Game Panel.
+title: "[Feature]: "
+labels: ["enhancement"]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to suggest an improvement for the Game Panel.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: |
+        Is your feature request related to a problem?
+        Please describe the problem or limitation you are facing.
+      placeholder: |
+        Example:
+        Managing multiple game servers becomes difficult because...
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed_solution
+    attributes:
+      label: Proposed solution
+      description: Describe the feature or improvement you would like to see.
+      placeholder: Describe your idea here...
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Have you considered any alternative solutions or workarounds?
+
+  - type: textarea
+    id: additional_context
+    attributes:
+      label: Additional context
+      description: Add screenshots, mockups or any additional information here.

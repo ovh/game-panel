@@ -36,9 +36,7 @@ interface ContainerConfigTabProps {
   textSecondary: string;
   hoverBg: string;
   canEdit: boolean;
-  /** Whether the caller holds `server.env` on this server. When false the env
-   *  is redacted by the backend (returned as `{}`) and ignored on PATCH, so the
-   *  editor is replaced by a "no permission" notice and env is omitted on save. */
+  /** Whether the caller holds `server.env`; when false the env editor is hidden and env is omitted on save. */
   canManageEnv: boolean;
   pickerManagedKeys?: string[];
   onSaved?: () => void;
@@ -249,10 +247,7 @@ export function ContainerConfigTab({
       resourceLimits: (cpuVal > 0 || memVal > 0) ? { cpu: cpuVal > 0 ? cpuVal : 0, memoryMb: memVal > 0 ? memVal : 0 } : null,
     };
 
-    // Only send env when the caller holds `server.env`. Without it the backend
-    // ignores the field anyway, but the loaded env is redacted to `{}`, so
-    // sending it here would just be a confusing no-op (and risks clobbering on
-    // any future backend change). The other fields above are applied normally.
+    // Only send env with `server.env`; otherwise the loaded env is redacted to `{}`.
     if (canManageEnv) {
       payload.env = entriesToEnv(envEntries);
     }
@@ -422,9 +417,7 @@ export function ContainerConfigTab({
           </div>
         </div>
 
-        {/* Environment Variables — only rendered with `server.env`. Without it
-            the backend redacts env to `{}`, so there is nothing to show; the
-            whole section is hidden rather than displayed empty. */}
+        {/* Environment Variables — only rendered with `server.env` */}
         {canManageEnv && (
         <div className={`${contentBg} border ${borderColor} rounded-lg p-4 sm:p-6`}>
           <h4 className={`text-base font-semibold ${textPrimary} mb-4`}>Environment Variables</h4>

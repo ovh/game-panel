@@ -11,7 +11,6 @@ export function parseCs2Params(raw: string): Record<string, string> {
       continue;
     }
 
-    // Extract key (everything up to first space or end)
     const spaceIdx = s.indexOf(' ');
     if (spaceIdx === -1) {
       result[s.slice(1)] = '';
@@ -27,7 +26,6 @@ export function parseCs2Params(raw: string): Record<string, string> {
 
     let value: string;
     if (s.startsWith('"')) {
-      // Quoted value
       const closeIdx = s.indexOf('"', 1);
       if (closeIdx === -1) {
         value = s.slice(1);

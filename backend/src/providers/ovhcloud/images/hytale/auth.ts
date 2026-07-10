@@ -41,7 +41,7 @@ async function startDeviceFlow(serverId: number): Promise<OAuthTokens> {
         },
         expiresAt,
     });
-    await installProgressRepository.update(serverId, 60, 'hytale_account_auth');
+    await installProgressRepository.update(serverId, 40, 'hytale_account_auth');
 
     const intervalMs = Math.max(Number(device.interval ?? 5), 1) * 1000;
     const deadline = Date.now() + Number(device.expires_in ?? 600) * 1000;
@@ -194,7 +194,7 @@ async function selectProfile(params: {
         },
         expiresAt,
     });
-    await installProgressRepository.update(params.serverId, 65, 'hytale_profile_selection');
+    await installProgressRepository.update(params.serverId, 50, 'hytale_profile_selection');
 
     const response = await waitForInteractionResponse(interactionId, expiresAt);
     const selectedUuid = typeof response.profileUuid === 'string' ? response.profileUuid.trim() : '';
@@ -277,7 +277,7 @@ export async function prepareHytaleServerAuth(params: {
     ownership: ServerMountOwnership;
 }): Promise<void> {
     const paths = hytalePaths(params.serverId, params.metadata.patchline);
-    await installProgressRepository.update(params.serverId, 60, 'hytale_account_auth');
+    await installProgressRepository.update(params.serverId, 40, 'hytale_account_auth');
     const oauth = await getProviderOAuthTokens(params.serverId, paths);
     const profiles = await getProfiles(oauth.access_token);
     const profile = await selectProfile({
@@ -287,7 +287,7 @@ export async function prepareHytaleServerAuth(params: {
         profiles,
     });
 
-    await installProgressRepository.update(params.serverId, 68, 'configuring_hytale_auth');
+    await installProgressRepository.update(params.serverId, 60, 'configuring_hytale_auth');
     await writeCredentialStore({
         paths,
         oauth,

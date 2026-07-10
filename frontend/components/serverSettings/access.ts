@@ -50,6 +50,10 @@ export interface ServerSettingsAccess {
   canReadHytaleMods: boolean;
   canWriteHytaleMods: boolean;
   canUseHytale: boolean;
+  // Palworld
+  canReadPalworldSettings: boolean;
+  canWritePalworldSettings: boolean;
+  canUsePalworld: boolean;
   // CS2
   canWriteCS2Frameworks: boolean;
   canAccessTab: (tab: SettingsTab) => boolean;
@@ -77,11 +81,8 @@ export function createServerSettingsAccess(
     hasServerPermission('backups.delete') ||
     hasServerPermission('backups.rename');
   const canEditContainerConfig = hasServerPermission('server.edit');
-  // Environment variables can hold secrets (RCON passwords, tokens, …) so they
-  // are gated behind a dedicated `server.env` permission, on top of the
-  // `server.edit` needed to open the container config at all. The backend
-  // redacts `env` (returns `{}`) and silently ignores it in PATCH for callers
-  // that lack this permission.
+  // Env vars can hold secrets, so they are gated behind `server.env`; without it
+  // the backend redacts `env` to `{}` and ignores it in PATCH.
   const canManageEnv = hasServerPermission('server.env');
   const canWriteFiles = hasServerPermission('fs.write');
   const canDownloadBackups = hasServerPermission('backups.download');
@@ -121,13 +122,18 @@ export function createServerSettingsAccess(
   const canWriteHytaleMods = hasServerPermission('hytale.mods.write');
   const canUseHytale = canReadHytaleSettings || canWriteHytaleSettings || canReadHytaleMods || canWriteHytaleMods;
 
+  // Palworld
+  const canReadPalworldSettings = hasServerPermission('palworld.settings.read');
+  const canWritePalworldSettings = hasServerPermission('palworld.settings.write');
+  const canUsePalworld = canReadPalworldSettings || canWritePalworldSettings;
+
   // CS2
   const canWriteCS2Frameworks = hasServerPermission('cs2.frameworks.write');
 
   const hasAnySettingsAccess =
     canUseGameConfig || canUseFileManager || canUseTerminal || canUseBackup ||
     canEditContainerConfig || canReadScheduledTasks || canWriteScheduledTasks ||
-    canUseMinecraft || canUseHytale;
+    canUseMinecraft || canUseHytale || canUsePalworld;
 
   const canAccessTab = (tab: SettingsTab): boolean => {
     switch (tab) {
@@ -136,7 +142,6 @@ export function createServerSettingsAccess(
       case 'gameconfig':    return canUseGameConfigTab;
       case 'backup':        return canUseBackup;
       case 'containerconfig': return canEditContainerConfig;
-      // Reading scheduled tasks now requires `scheduledtasks.read`.
       case 'scheduledtasks':  return canReadScheduledTasks;
       default:              return false;
     }
@@ -179,6 +184,9 @@ export function createServerSettingsAccess(
     canReadHytaleMods,
     canWriteHytaleMods,
     canUseHytale,
+    canReadPalworldSettings,
+    canWritePalworldSettings,
+    canUsePalworld,
     canWriteCS2Frameworks,
     canAccessTab,
   };

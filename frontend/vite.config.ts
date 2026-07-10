@@ -27,10 +27,7 @@ export default defineConfig({
     chunkSizeWarningLimit: 1000,
     rollupOptions: {
       output: {
-        // Isolate the heavy optional vendors into their own chunks. Combined with the
-        // React.lazy boundaries (CodeEditor, ServerSshTerminal, HostStatus), these are
-        // fetched on demand and cached independently across deploys instead of bloating
-        // the single entry chunk.
+        // Split heavy optional vendors into their own chunks so they load on demand and cache independently.
         manualChunks(id) {
           if (!id.includes('node_modules')) return undefined;
           if (id.includes('@codemirror') || id.includes('@uiw') || id.includes('@lezer')) {

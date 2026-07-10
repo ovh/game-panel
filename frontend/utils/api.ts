@@ -21,8 +21,7 @@ export type {
 export { PUBLIC_CONNECTION_HOST } from './api/runtime';
 export type { RealtimeConnectionStatus } from './api/realtimeGateway';
 
-// Normal requests fail fast; only the explicitly long-running install/upload/restore
-// and large download calls opt into the extended timeout via per-request config.
+// Long-running install/upload/restore/download calls opt into the extended timeout per-request.
 const DEFAULT_TIMEOUT_MS = 60_000;
 const LONG_TIMEOUT_MS = 30 * 60 * 1000;
 
@@ -57,8 +56,7 @@ class ApiClient {
 
         if (status === 401 && !isAuthLoginRequest) {
           this.clearAuth();
-          // Prefer a React-level expiry signal (preserves the SPA and unsaved work);
-          // fall back to a hard redirect only if no handler is registered.
+          // Prefer the React-level expiry handler; fall back to a hard redirect if none.
           if (this.unauthorizedHandler) {
             this.unauthorizedHandler();
           } else {
@@ -70,9 +68,7 @@ class ApiClient {
     );
   }
 
-  /** Register a callback invoked when a request is rejected with 401 (session
-   *  expired/revoked), so the app can reset to the login screen in-place instead
-   *  of doing a full page reload. */
+  /** Register a callback invoked on a 401 so the app can reset to login in-place. */
   setUnauthorizedHandler(handler: (() => void) | null) {
     this.unauthorizedHandler = handler;
   }
@@ -179,11 +175,7 @@ class ApiClient {
       message?: string;
       token?: string;
     };
-    // The backend bumps the user's token_version on password change, which
-    // invalidates every previously issued JWT (including the one this session
-    // is currently using). It returns a fresh token carrying the new version;
-    // store it so the current session keeps working instead of getting a 401
-    // on the very next request.
+    // A password change invalidates every prior JWT; store the fresh token so this session survives.
     if (typeof data.token === 'string' && data.token.length > 0) {
       this.setAuthToken(data.token);
     }
@@ -734,9 +726,7 @@ class ApiClient {
     root?: string
   ) {
     const SMALL_LIMIT = 64 * 1024 * 1024;
-    // destDir is the directory the upload is anchored to (always exists); relativePath is the
-    // file's path relative to it (e.g. "mymod/sub/file.txt"). The backend recreates any missing
-    // parent directories (ensureParentDirsWithOwnership), so dragging a folder keeps its structure.
+    // relativePath may carry nested sub-folders; the backend recreates missing parent dirs.
     const baseDir = destDir.replace(/\/$/, '') || '';
     const destPath = `${baseDir}/${relativePath}`;
 
@@ -751,8 +741,6 @@ class ApiClient {
     } else {
       const CHUNK_SIZE = 16 * 1024 * 1024;
       const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-      // Anchor the session at destDir (which exists, satisfying the server's ensureIsDir check) and
-      // let the chunk relativePath carry the nested sub-folders the backend will mkdir -p.
       const dirPath = baseDir || '/';
 
       const sessionRes = await this.client.post(
@@ -994,6 +982,26 @@ class ApiClient {
 
   async patchHytaleSettings(serverId: number, settings: Record<string, string | number | boolean>) {
     const response = await this.client.patch(`/api/servers/${serverId}/hytale/settings`, { settings });
+    return response.data as { updated: string[]; settings: Array<unknown> };
+  }
+
+  // ── Palworld OVHcloud ─────────────────────────────────────────────────────
+
+  async getPalworldSettings(serverId: number) {
+    const response = await this.client.get(`/api/servers/${serverId}/palworld/settings`);
+    return response.data as {
+      settings: Array<{
+        key: string; label: string; description: string;
+        type: 'integer' | 'boolean' | 'string' | 'float' | 'select';
+        options?: Array<{ label: string; value: string }> | string[];
+        min?: number; max?: number;
+        value: string | number | boolean;
+      }>;
+    };
+  }
+
+  async patchPalworldSettings(serverId: number, settings: Record<string, string | number | boolean>) {
+    const response = await this.client.patch(`/api/servers/${serverId}/palworld/settings`, { settings });
     return response.data as { updated: string[]; settings: Array<unknown> };
   }
 

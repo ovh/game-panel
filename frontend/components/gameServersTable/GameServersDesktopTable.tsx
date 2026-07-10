@@ -23,8 +23,8 @@ import type { AuthUser } from '../../utils/permissions';
 import { AppButton, AppInput, AppTable } from '../../src/ui/components';
 import { useTheme } from '../../contexts/ThemeContext';
 import {
-  isServerRunningStatus,
-  isServerStoppedStatus,
+  isServerUpLike,
+  isServerDownLike,
   isServerTransitioningStatus,
   isServerCreatingStatus,
   isServerInstallingStatus,
@@ -155,10 +155,7 @@ export function GameServersDesktopTable({
     return () => document.removeEventListener('mousedown', handleOutside);
   }, [metricsPopoverOpen]);
 
-  // The table lives inside an `overflow-x-auto` wrapper, which forces
-  // `overflow-y: auto` and clips an absolutely-positioned dropdown (causing a
-  // stray scrollbar). Render the popover in a portal with fixed positioning so
-  // it escapes the scroll container entirely.
+  // Portal + fixed positioning so the popover escapes the table's overflow-x-auto scroll container.
   useEffect(() => {
     if (!metricsPopoverOpen) return;
     const updatePosition = () => {
@@ -313,8 +310,9 @@ export function GameServersDesktopTable({
             const { normalizedStatus, label: statusLabel, className: statusClassName } =
               getServerStatusPresentation(server.status);
             const connectionCopyState = server.port ? getConnectionCopyState(server.port) : 'idle';
-            const isRunning = isServerRunningStatus(server.status);
-            const isStopped = isServerStoppedStatus(server.status);
+            // Up-like (running/unhealthy) → offer Stop; down-like (stopped/failed) → offer Start.
+            const isUpLike = isServerUpLike(server.status);
+            const isDownLike = isServerDownLike(server.status);
             const isCreating = isServerCreatingStatus(server.status);
             const isInstalling = isServerInstallingStatus(server.status);
             const isTransitioning = isServerTransitioningStatus(server.status);
@@ -445,7 +443,13 @@ export function GameServersDesktopTable({
                     type="button"
                     onClick={() => openHistoryModal(server, canReadLogs)}
                     disabled={!canReadLogs}
-                    title={canReadLogs ? 'Open history logs' : 'Missing permission: container.logs.read'}
+                    title={
+                      normalizedStatus === 'failed' && server.lastError
+                        ? `Failed: ${server.lastError}`
+                        : canReadLogs
+                          ? 'Open history logs'
+                          : 'Missing permission: container.logs.read'
+                    }
                     className={`gp-status-badge inline-flex items-center justify-center rounded-full border px-4 py-1 text-sm font-semibold leading-none tracking-[0.04em] transition-colors ${statusClassName} ${
                       canReadLogs ? 'hover:brightness-110' : 'opacity-60 cursor-not-allowed'
                     }`}
@@ -455,7 +459,7 @@ export function GameServersDesktopTable({
                   </div>
                 </td>
                 <td className="py-4 px-4">
-                  {isServerRunningStatus(server.status) ? (
+                  {isServerUpLike(server.status) ? (
                     <div className="flex flex-col gap-0.5 min-w-[185px]">
                       {visibleMetrics.includes('cpu') && (
                       <button
@@ -541,7 +545,7 @@ export function GameServersDesktopTable({
                 </td>
                 <td className="py-4 px-4">
                   <div className="flex gap-2">
-                    {isRunning ? (
+                    {isUpLike ? (
                       <AppButton
                         disabled={!canTriggerPowerAction}
                         onClick={() =>
@@ -561,7 +565,7 @@ export function GameServersDesktopTable({
                       >
                         <Square className="w-4 h-4" />
                       </AppButton>
-                    ) : isStopped ? (
+                    ) : isDownLike ? (
                       <AppButton
                         disabled={!canTriggerPowerAction}
                         onClick={() =>

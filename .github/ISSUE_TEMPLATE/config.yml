@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+
+contact_links:
+  - name: 🎮 Join our Discord Community
+    url: https://discord.gg/ovhcloud
+    about: Ask questions and discuss with the community on Discord.
+
+  - name: 📖 Official Game Panel Guides
+    url: https://docs.ovhcloud.com/en/guides/bare-metal-cloud/virtual-private-servers/landing-page-game-panel
+    about: Read the official OVHcloud Game Panel documentation.
+
+  - name: 🌐 OVHcloud Website
+    url: https://www.ovhcloud.com
+    about: Visit the OVHcloud website.

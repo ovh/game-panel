@@ -2,7 +2,8 @@ import type { Dispatch, SetStateAction } from 'react';
 import type { CLIMessage } from '../../types/cli';
 import type { GameServer } from '../../types/gameServer';
 import { apiClient } from '../../utils/api';
-import { isServerRunningStatus, isServerStoppedStatus } from '../../utils/serverRuntime';
+import { isServerUpLike, isServerDownLike } from '../../utils/serverRuntime';
+import { nextId } from '../../utils/uid';
 
 type CliMessageLevel = 'success' | 'error' | 'info' | 'warning';
 type AddCliMessage = (
@@ -178,17 +179,11 @@ export const createServerActionHandler =
         case 'start': {
           await apiClient.startServer(parseInt(serverId, 10));
           addCLIMessage('success', `${serverName} started`, serverName, 'start');
-          if (openConsoleTabs.includes(serverId)) {
-            setTimeout(() => {
-              apiClient.subscribeLogs(parseInt(serverId, 10), serverLogHistoryLimit);
-            }, 2000);
-          }
           break;
         }
 
         case 'stop': {
           await apiClient.stopServer(parseInt(serverId, 10));
-          apiClient.unsubscribeLogs(parseInt(serverId, 10));
           addCLIMessage('success', `${serverName} stopped`, serverName, 'stop');
           break;
         }
@@ -216,14 +211,8 @@ export const createServerActionHandler =
           break;
 
         case 'restart': {
-          apiClient.unsubscribeLogs(parseInt(serverId, 10));
           await apiClient.restartServer(parseInt(serverId, 10));
           addCLIMessage('success', `${serverName} is restarting...`, serverName, 'restart');
-          if (openConsoleTabs.includes(serverId)) {
-            setTimeout(() => {
-              apiClient.subscribeLogs(parseInt(serverId, 10), serverLogHistoryLimit);
-            }, 2000);
-          }
           break;
         }
 
@@ -302,17 +291,17 @@ interface CreateStartAllHandlerDeps {
 export const createStartAllHandler =
   ({ gameServers, setGameServers, setCliMessages }: CreateStartAllHandlerDeps) =>
   () => {
-    const affectedServers = gameServers.filter((server) => isServerStoppedStatus(server.status));
+    const affectedServers = gameServers.filter((server) => isServerDownLike(server.status));
     setGameServers(
       gameServers.map((server) => ({
         ...server,
-        status: isServerStoppedStatus(server.status) ? 'starting' : server.status,
+        status: isServerDownLike(server.status) ? 'starting' : server.status,
       }))
     );
 
     const timestamp = new Date().toISOString();
     const newMessage: CLIMessage = {
-      id: Date.now().toString(),
+      id: String(nextId()),
       timestamp,
       server: 'System',
       action: 'start-all',
@@ -331,17 +320,17 @@ interface CreateStopAllHandlerDeps {
 export const createStopAllHandler =
   ({ gameServers, setGameServers, setCliMessages }: CreateStopAllHandlerDeps) =>
   () => {
-    const affectedServers = gameServers.filter((server) => isServerRunningStatus(server.status));
+    const affectedServers = gameServers.filter((server) => isServerUpLike(server.status));
     setGameServers(
       gameServers.map((server) => ({
         ...server,
-        status: isServerRunningStatus(server.status) ? 'stopping' : server.status,
+        status: isServerUpLike(server.status) ? 'stopping' : server.status,
       }))
     );
 
     const timestamp = new Date().toISOString();
     const newMessage: CLIMessage = {
-      id: Date.now().toString(),
+      id: String(nextId()),
       timestamp,
       server: 'System',
       action: 'stop-all',

@@ -61,8 +61,7 @@ export function ServerSettingsModalLayout({
   const dialogRef = useRef<HTMLDivElement>(null);
   useBodyScrollLock(isOpen);
   useFocusTrap(isOpen, dialogRef, { onEscape: onClose });
-  // Windowed only on a genuinely large screen (desktop / tablet). A phone in landscape is wide but
-  // short, so keying off width alone leaves it windowed — require height too, else go fullscreen.
+  // Require both width and height so a wide-but-short phone landscape goes fullscreen.
   const isWindowed = useMediaQuery('(min-width: 768px) and (min-height: 600px)');
   if (!isOpen) return null;
 
@@ -226,9 +225,7 @@ export function ServerSettingsModalLayout({
           </div>
 
           <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
-            {/* Each tab renders its content only when the user can actually
-                access it. Inaccessible tabs are greyed-out in the sidebar and
-                can't be opened, so this is also a defensive guard. */}
+            {/* Defensive guard: inaccessible tabs can't be opened from the sidebar anyway */}
             {!canAccessTab(activeTab) && (
               <div className="flex h-full items-center justify-center p-8 text-center">
                 <div>

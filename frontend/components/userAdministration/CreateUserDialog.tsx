@@ -16,8 +16,7 @@ interface CreateUserDialogProps {
   createPasswordConfirm: string;
   setCreatePasswordConfirm: (value: string) => void;
   onCreateUser: () => void;
-  /** Error shown inline inside the dialog (the modal stays open on failure, so
-   *  a page-level banner would be hidden behind it). */
+  /** Error shown inline; the modal stays open on failure, so a page banner would be hidden. */
   error?: string | null;
 }
 

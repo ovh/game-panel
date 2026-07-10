@@ -1,9 +1,4 @@
-/**
- * App-owned localStorage keys that cache server/host operational data
- * (resource-usage history, latest metrics, table preferences). These outlive the
- * auth token, so they must be cleared on logout / session expiry to avoid leaking
- * the previous user's infrastructure data on a shared machine.
- */
+// App-owned localStorage cache keys; cleared on logout to avoid leaking data across users.
 const APP_CACHE_KEYS = [
   'system_metrics_latest',
   'system_history_raw',

@@ -80,10 +80,6 @@ function AppContent() {
   const [logPromptRules, setLogPromptRules] = useState<LogPromptRule[]>([]);
   const serversRef = useRef<GameServer[]>([]);
   const suppressReplayAfterClearRef = useRef<Record<string, boolean>>({});
-  // Container the open log subscription is following, per server. Used to avoid a
-  // redundant re-subscribe (which replays the whole backlog and duplicates logs)
-  // when a server flips to "running" without its container actually changing.
-  const subscribedLogsContainerIdRef = useRef<Record<string, string | null>>({});
   const lastInstallProgressLogRef = useRef<Record<number, number>>({});
   const handleWebSocketMessageRef = useRef<(message: any) => void>(() => {});
   const handleLogoutRef = useRef<() => void>(() => {});
@@ -189,9 +185,7 @@ function AppContent() {
     };
   }, [loadCatalogMetadata]);
 
-  // Lazily load log prompt rules for each LinuxGSM game type currently installed.
-  // Avoids bulk-fetching the entire catalog at startup — only fetches metadata for
-  // games that are actually present, and only once per game key per session.
+  // Lazily load log prompt rules per installed LinuxGSM game type — only present games, once per key per session.
   const lgsmGameTypesKey = gameServers
     .filter((s) => s.provider === 'linuxgsm')
     .map((s) => s.game)
@@ -231,9 +225,7 @@ function AppContent() {
   }, [lgsmGameTypesKey]);
 
   useEffect(() => {
-    // Per-server metrics are only rendered on the game-servers view (table + metric
-    // modal). Subscribe only while that tab is active and tear down otherwise, so other
-    // views don't keep a fleet-wide metrics stream (and backend poller load) alive.
+    // Per-server metrics only render on the game-servers view; subscribe only while active to avoid a fleet-wide stream.
     if (!authReady || !isAuthenticated || activeTab !== 'game-servers') {
       subscribedMetricsServerIdsRef.current.forEach((serverId) => {
         apiClient.unsubscribeMetrics(serverId);
@@ -262,41 +254,6 @@ function AppContent() {
     subscribedMetricsServerIdsRef.current = nextServerIds;
   }, [authReady, isAuthenticated, activeTab, metricsServerIdsKey]);
 
-  // When a server flips to "running" with an open console tab, re-subscribe to logs
-  // ONLY if its container actually changed since we subscribed. The stream opened
-  // when the console was first shown already follows the same container, so a plain
-  // status flip needs no action — re-subscribing would make the backend resend the
-  // full history and replay the backlog on a fresh stream, duplicating every line
-  // already on screen.
-  const prevServerStatusesRef = useRef<Record<string, string>>({});
-  const openConsoleTabsRef = useRef(openConsoleTabs);
-  useEffect(() => { openConsoleTabsRef.current = openConsoleTabs; }, [openConsoleTabs]);
-  useEffect(() => {
-    gameServers.forEach((server) => {
-      const serverId = String(server.id);
-      const prevStatus = prevServerStatusesRef.current[serverId];
-      const currentStatus = server.status;
-      if (
-        prevStatus !== undefined &&
-        prevStatus !== 'running' &&
-        currentStatus === 'running' &&
-        openConsoleTabsRef.current.includes(serverId)
-      ) {
-        const subscribedContainerId = subscribedLogsContainerIdRef.current[serverId] ?? null;
-        const currentContainerId = server.dockerContainerId ?? null;
-        if (subscribedContainerId !== currentContainerId) {
-          suppressReplayAfterClearRef.current[serverId] = false;
-          subscribedLogsContainerIdRef.current[serverId] = currentContainerId;
-          apiClient.unsubscribeLogs(Number(server.id));
-          apiClient.subscribeLogs(Number(server.id), SERVER_LOG_HISTORY_LIMIT);
-        }
-      }
-    });
-    const next: Record<string, string> = {};
-    gameServers.forEach((s) => { next[String(s.id)] = s.status; });
-    prevServerStatusesRef.current = next;
-  }, [gameServers]);  
-
   const resolveServerName = (serverId: number | string, fallback?: string): string => {
     if (fallback) return fallback;
     const id = String(serverId);
@@ -316,8 +273,6 @@ function AppContent() {
     (serverId: number) => {
       const serverIdString = String(serverId);
 
-      subscribedLogsContainerIdRef.current[serverIdString] =
-        serversRef.current.find((s) => s.id === serverIdString)?.dockerContainerId ?? null;
       apiClient.subscribeLogs(serverId, SERVER_LOG_HISTORY_LIMIT);
 
       setActiveConsoleTab(serverIdString);
@@ -401,7 +356,6 @@ function AppContent() {
         return next;
       });
       delete suppressReplayAfterClearRef.current[serverId];
-      delete subscribedLogsContainerIdRef.current[serverId];
       clearRecentLogPromptMatchesForServer(serverId);
       setOpenConsoleTabs((prev) => prev.filter((id) => id !== serverId));
       setActiveConsoleTab((prev) => (prev === serverId ? 'cli-console' : prev));
@@ -510,7 +464,6 @@ function AppContent() {
     setServerHistoryById({});
     setServerMetricsHistoryById({});
     suppressReplayAfterClearRef.current = {};
-    subscribedLogsContainerIdRef.current = {};
     setOpenConsoleTabs([]);
     setActiveConsoleTab('cli-console');
     setConsoleTerminalTarget(null);
@@ -525,12 +478,10 @@ function AppContent() {
     subscribedMetricsServerIdsRef.current.clear();
   };
 
-  // Keep a stable reference to the latest logout logic so the 401 handler below can
-  // call it without re-registering on every render.
+  // Stable ref so the 401 handler can call the latest logout without re-registering each render.
   handleLogoutRef.current = handleLogout;
 
-  // On a 401 (session expired/revoked) the API client clears the token; reset the
-  // SPA to the login screen in place instead of forcing a full page reload.
+  // On 401 the API client clears the token; reset to the login screen in place rather than a full reload.
   useEffect(() => {
     apiClient.setUnauthorizedHandler(() => {
       handleLogoutRef.current();
@@ -676,7 +627,6 @@ function AppContent() {
 
     handleClearServerLogs(serverId);
     delete suppressReplayAfterClearRef.current[serverId];
-    delete subscribedLogsContainerIdRef.current[serverId];
     setActiveConsoleTab((prev) => (prev === serverId ? 'cli-console' : prev));
     setOpenConsoleTabs((prev) => prev.filter((id) => id !== serverId));
     setConsoleTerminalTarget((prev) => (prev?.serverId === Number(serverId) ? null : prev));
@@ -758,6 +708,7 @@ function AppContent() {
       handleClearInstallError={handleClearInstallError}
       openInstallLogs={openInstallLogs}
       serverLogs={serverLogs}
+      onAppendServerLog={handleAddLog}
       cliMessages={cliMessages}
       handleClearServerLogs={handleClearServerLogs}
       handleClearCLI={handleClearCLI}

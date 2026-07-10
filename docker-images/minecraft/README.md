@@ -1,4 +1,4 @@
-# ⛏️ Minecraft Docker Images
+# Minecraft Docker Images
 
 This directory contains the Minecraft game server images used by OVHcloud Game Panel.
 
@@ -23,6 +23,7 @@ The images provide a predictable Docker runtime for Minecraft Java Edition and M
 | Cold backup while stopped | Supported | Supported |
 | Restore | Supported | Supported |
 | Health check | Process and TCP check | Process check |
+| Mods / plugins | Paper: plugins; Fabric/NeoForge: mods; Vanilla: none | Not supported |
 | Persistent data | `/data` | `/data` |
 | Backup directory | `/backups` | `/backups` |
 
@@ -40,7 +41,17 @@ Common image inputs:
 | NeoForge | `EULA`, `NEOFORGE_VERSION` |
 | Bedrock | `EULA`, `MC_VERSION`, `BEDROCK_DOWNLOAD_URL` |
 
-The Java images also accept common Java runtime tuning variables such as `JAVA_OPTS`, `JVM_OPTS`, `JAVA_XMS`, and `JAVA_XMX`.
+Boolean inputs accept `true` / `false` (and `1`, `yes`, `on` / `0`, `no`, `off`), case-insensitive.
+
+Common tuning inputs (version inputs above are catalog-driven and have no default):
+
+| Input | Default | Allowed values | Purpose |
+| --- | --- | --- | --- |
+| `EULA` | *(required)* | `TRUE` | Accept the Minecraft EULA; the server refuses to start otherwise. |
+| `JAVA_XMS` | *(unset)* | e.g. `2G`, `2048M` | Initial JVM heap size (Java images). |
+| `JAVA_XMX` | *(unset)* | e.g. `4G`, `4096M` | Maximum JVM heap size (Java images). |
+| `JAVA_OPTS`, `JVM_OPTS` | *(unset)* | JVM flags | Extra JVM options (Java images). |
+| `BACKUP_INCLUDE_SERVER_ARTIFACT` | `false` | boolean | Include the downloadable server artifact in backup archives. |
 
 ## 🔌 Paths and ports
 
@@ -63,3 +74,13 @@ The images expose the following scripts:
 | `/app/healthcheck.sh` | Reports container health to Docker. |
 
 Backups are stored as `.tar.gz` archives. Downloadable server artifacts are excluded by default and can be included by setting `BACKUP_INCLUDE_SERVER_ARTIFACT=true`. Restore operations validate backup metadata before replacing the current server data.
+
+## 🧩 Mods
+
+Mod and plugin support depends on the image family:
+
+- **Paper** — server plugins (`.jar`) placed in `/data/plugins`.
+- **Fabric / NeoForge** — mods (`.jar`) placed in `/data/mods`; the mod loader is part of the server image.
+- **Vanilla** and **Bedrock** — no plugin or mod support.
+
+A restart is required for changes to take effect.

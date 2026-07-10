@@ -2,7 +2,7 @@ import { Router, type Response } from 'express';
 import { type AuthenticatedRequest, requireServerPermission } from '../middleware/auth.js';
 import { getBackupSettings, setBackupSettings } from '../services/backupSettings.js';
 import { listServerFiles, resolveServerPath } from '../services/fileExplorer.js';
-import { ensureIsFile, getBasenameFromApiPath, guessContentTypeByName } from '../utils/fsBrowser.js';
+import { ensureIsDir, ensureIsFile, getBasenameFromApiPath, guessContentTypeByName } from '../utils/fsBrowser.js';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { getServerOrThrow } from '../services/servers.js';
@@ -19,9 +19,11 @@ import {
     assertSupportedBackupArchive,
     createServerBackup,
     getBackupFileLocation,
+    getBackupKind,
     getSupportedBackupExtensions,
     restoreOvhcloudBackup,
 } from '../services/serverBackups.js';
+import { resolveDownloadTarget, streamDirectoryZip } from '../services/fileTransfers.js';
 import { PERMISSIONS } from '../permissions.js';
 
 const router = Router({ mergeParams: true });
@@ -51,8 +53,8 @@ router.get('/', requireServerPermission(PERMISSIONS.backups.read), async (req: A
         const serverId = requirePositiveInt(req.params.id, 'Invalid server id');
 
         const server = await getServerOrThrow(serverId);
-        const extensions = getSupportedBackupExtensions(server);
-        const location = getBackupFileLocation(server);
+        const kind = getBackupKind(server);
+        const location = await getBackupFileLocation(server);
 
         let result;
         try {
@@ -73,9 +75,14 @@ router.get('/', requireServerPermission(PERMISSIONS.backups.read), async (req: A
             throw error;
         }
 
-        result.entries = result.entries.filter((e: any) => (
-            e.type === 'file' && extensions.some((extension) => e.name.endsWith(extension))
-        ));
+        if (kind === 'directory') {
+            result.entries = result.entries.filter((e: any) => e.type === 'dir');
+        } else {
+            const extensions = getSupportedBackupExtensions(server);
+            result.entries = result.entries.filter((e: any) => (
+                e.type === 'file' && extensions.some((extension) => e.name.endsWith(extension))
+            ));
+        }
         result.path = '/';
 
         return res.json(result);
@@ -99,7 +106,25 @@ router.get('/file', requireServerPermission(PERMISSIONS.backups.download), async
         const download = String(req.query.download ?? '') === '1';
 
         const server = await getServerOrThrow(serverId);
-        const location = getBackupFileLocation(server);
+        const kind = getBackupKind(server);
+        const location = await getBackupFileLocation(server);
+
+        if (kind === 'directory') {
+            const backupName = normalizeBackupFilename(apiPath.replace(/^\/+/, ''));
+            if (!backupName) return res.status(400).json({ error: 'Invalid backup name' });
+
+            const target = await resolveDownloadTarget({
+                serverId,
+                root: location.root,
+                path: joinApiPath(location.basePath, backupName),
+            });
+
+            res.setHeader('Content-Type', 'application/zip');
+            res.setHeader('Content-Disposition', `attachment; filename="${target.filename}"`);
+            await streamDirectoryZip({ target, output: res });
+            return;
+        }
+
         const resolved = await resolveServerPath({
             serverId,
             path: joinApiPath(location.basePath, apiPath),
@@ -136,18 +161,28 @@ router.patch('/file', requireServerPermission(PERMISSIONS.backups.rename), async
         if (!nextName) return res.status(400).json({ error: 'Invalid backup name' });
 
         const server = await getServerOrThrow(serverId);
-        assertSupportedBackupArchive(server, nextName);
+        const kind = getBackupKind(server);
+        if (kind !== 'directory') {
+            assertSupportedBackupArchive(server, nextName);
+        }
 
-        const location = getBackupFileLocation(server);
+        const location = await getBackupFileLocation(server);
         const source = await resolveServerPath({
             serverId,
             path: joinApiPath(location.basePath, apiPath),
             root: location.root,
         });
-        await ensureIsFile(source.absPath, source.rootDir);
+
+        if (kind === 'directory') {
+            await ensureIsDir(source.absPath, source.rootDir);
+        } else {
+            await ensureIsFile(source.absPath, source.rootDir);
+        }
 
         const currentName = getBasenameFromApiPath(source.apiPath);
-        assertSupportedBackupArchive(server, currentName);
+        if (kind !== 'directory') {
+            assertSupportedBackupArchive(server, currentName);
+        }
 
         const targetRelativePath = path.posix.join(path.posix.dirname(apiPath || '/'), nextName);
         const target = await resolveServerPath({
@@ -253,22 +288,39 @@ router.post(
                 return res.status(501).json({ error: 'Restore is only supported for OVHcloud servers with restore support' });
             }
 
-            const location = getBackupFileLocation(server);
-            const resolved = await resolveServerPath({
-                serverId,
-                path: joinApiPath(location.basePath, apiPath),
-                root: location.root,
-            });
-            await ensureIsFile(resolved.absPath, resolved.rootDir);
+            const kind = getBackupKind(server);
+            const location = await getBackupFileLocation(server);
 
-            const filename = getBasenameFromApiPath(resolved.apiPath);
-            assertSupportedBackupArchive(server, filename);
+            let resolvedApiPath: string;
+            let filename: string;
+            if (kind === 'directory') {
+                const backupName = normalizeBackupFilename(apiPath.replace(/^\/+/, ''));
+                if (!backupName) return res.status(400).json({ error: 'Invalid backup name' });
+                const resolved = await resolveServerPath({
+                    serverId,
+                    path: joinApiPath(location.basePath, backupName),
+                    root: location.root,
+                });
+                await ensureIsDir(resolved.absPath, resolved.rootDir);
+                resolvedApiPath = resolved.apiPath;
+                filename = backupName;
+            } else {
+                const resolved = await resolveServerPath({
+                    serverId,
+                    path: joinApiPath(location.basePath, apiPath),
+                    root: location.root,
+                });
+                await ensureIsFile(resolved.absPath, resolved.rootDir);
+                filename = getBasenameFromApiPath(resolved.apiPath);
+                assertSupportedBackupArchive(server, filename);
+                resolvedApiPath = resolved.apiPath;
+            }
 
             await actionsRepository.create(serverId, 'info', `Restore requested: ${filename}`, req.user?.username || "");
 
             const result = await restoreOvhcloudBackup(server, {
                 apiPath,
-                resolvedApiPath: resolved.apiPath,
+                resolvedApiPath,
                 location,
             });
 
@@ -326,7 +378,22 @@ router.delete('/file', requireServerPermission(PERMISSIONS.backups.delete), asyn
         if (!apiPath) return res.status(400).json({ error: 'Missing path' });
 
         const server = await getServerOrThrow(serverId);
-        const location = getBackupFileLocation(server);
+        const kind = getBackupKind(server);
+        const location = await getBackupFileLocation(server);
+
+        if (kind === 'directory') {
+            const backupName = normalizeBackupFilename(apiPath.replace(/^\/+/, ''));
+            if (!backupName) return res.status(400).json({ error: 'Invalid backup name' });
+            const resolved = await resolveServerPath({
+                serverId,
+                path: joinApiPath(location.basePath, backupName),
+                root: location.root,
+            });
+            await ensureIsDir(resolved.absPath, resolved.rootDir);
+            await fs.rm(resolved.absPath, { recursive: true, force: true });
+            return res.json({ success: true });
+        }
+
         const resolved = await resolveServerPath({
             serverId,
             path: joinApiPath(location.basePath, apiPath),

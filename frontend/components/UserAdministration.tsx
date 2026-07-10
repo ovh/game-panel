@@ -184,9 +184,8 @@ export function UserAdministration({
   const allGlobalPerms = selectedUser?.isRoot
     ? normalizePermissions([...globalKnown])
     : stripWildcard(normalizePermissions([...globalKnown]));
-  // Only ever send canonical per-server permissions (no `*`, no unknown
-  // strings) — the backend now validates the array and rejects the whole
-  // request with a 400 otherwise.
+  // Only send canonical per-server permissions (no `*`, no unknown strings); the backend
+  // rejects the whole request with a 400 otherwise.
   const addMemberPerms = sanitizeServerPermissions(normalizePermissions([...addMemberKnown]));
 
   const resetCreateForm = useCallback(() => {

@@ -21,6 +21,11 @@ export type OvhcloudHytaleMetadata = OvhcloudProviderMetadata & {
     profileUuid: string | null;
 };
 
+export type OvhcloudPalworldMetadata = OvhcloudProviderMetadata & {
+    family: 'palworld';
+    serverType: 'palworld';
+};
+
 export function getLinuxGsmMetadata(server: GameServerRow): LinuxGsmProviderMetadata {
     if (server.provider !== 'linuxgsm') {
         throw Object.assign(new Error('Feature is only available for LinuxGSM servers'), { statusCode: 501 });
@@ -122,4 +127,14 @@ export function getOvhcloudHytaleMetadata(server: GameServerRow): OvhcloudHytale
         patchline: metadata.patchline,
         profileUuid: metadata.profileUuid ?? null,
     } as OvhcloudHytaleMetadata;
+}
+
+export function getOvhcloudPalworldMetadata(server: GameServerRow): OvhcloudPalworldMetadata {
+    const metadata = getOvhcloudMetadata(server);
+
+    if (metadata.family !== 'palworld' || metadata.serverType !== 'palworld') {
+        throw Object.assign(new Error('Feature is only available for OVHcloud Palworld servers'), { statusCode: 501 });
+    }
+
+    return metadata as OvhcloudPalworldMetadata;
 }

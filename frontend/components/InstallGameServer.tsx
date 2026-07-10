@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useBodyScrollLock } from '../src/ui/utils/useBodyScrollLock';
-import { AlertTriangle, ArrowLeft, ArrowRight, ChevronDown, Package, Plus, Search, Settings2, Trash2, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ArrowRight, ChevronDown, Eye, EyeOff, Info, Package, Plus, Search, Settings2, Trash2, X } from 'lucide-react';
 import { InstallationProgressModal } from './InstallationProgressModal';
 import type { InstallGameHandlerPayload } from './app/appActionHandlers';
 import type { InstallInteraction, InstallStep } from '../types/gameServer';
@@ -79,8 +79,7 @@ function parsePortRows(rows: PortRow[]): { host: number; container: number; labe
     .filter((r) => r.host > 0 && r.container > 0);
 }
 
-// A row that has any content (e.g. just a label) but is missing a valid Host/Container port is
-// invalid and must block submission. A fully empty row is fine — it's simply ignored.
+// A row with any content but no valid Host/Container port blocks submission; a fully empty row is ignored.
 function hasIncompletePortRow(rows: PortRow[]): boolean {
   return rows.some((r) => {
     const hasAnyValue = Boolean(r.host.trim() || r.container.trim() || r.label.trim());
@@ -357,6 +356,7 @@ interface ConfigModalProps {
   onHealthcheckChange?: (hc: Record<string, unknown> | null) => void;
   hytaleOptions?: { patchline: string; profileUuid: string };
   setHytaleOptions?: (opts: { patchline: string; profileUuid: string }) => void;
+  showPalworldAdmin?: boolean;
   usedServerNames?: string[];
   requireSteamCredentials?: boolean;
   steamUsername?: string;
@@ -378,10 +378,21 @@ interface ConfigModalProps {
   requireEula?: boolean;
 }
 
+// Generate a strong Palworld admin password (sent as PALWORLD_ADMIN_PASSWORD at install),
+// avoiding visually ambiguous characters. If the user clears it, the backend generates one.
+function generatePalworldAdminPassword(): string {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+  const bytes = new Uint32Array(20);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => alphabet[b % alphabet.length]).join('');
+}
+
 function ConfigModal({
   title, subtitle, provider, imageRef, serverName, setServerName, tcpPorts, setTcpPorts, udpPorts, setUdpPorts,
   envRows, setEnvRows, showEnv, mountRows, setMountRows, catalogHealthcheck, onHealthcheckChange,
-  hytaleOptions, setHytaleOptions, usedServerNames,
+  hytaleOptions, setHytaleOptions,
+  showPalworldAdmin,
+  usedServerNames,
   requireSteamCredentials, steamUsername, setSteamUsername, steamPassword, setSteamPassword,
   requireGameCopy,
   cpuLimit, setCpuLimit, memoryLimitMb, setMemoryLimitMb,
@@ -390,15 +401,16 @@ function ConfigModal({
 }: ConfigModalProps) {
   useBodyScrollLock(true);
   const [advancedOpen, setAdvancedOpen] = React.useState(false);
+  const [showAdminHelp, setShowAdminHelp] = React.useState(false);
+  const [showAdminPw, setShowAdminPw] = React.useState(false);
   const nameError = usedServerNames?.includes(serverName.trim()) ? 'A server with this name already exists.' : null;
 
   React.useEffect(() => {
-    if (nameError || error) setAdvancedOpen(true);
-  }, [nameError, error]);
+    if (error) setAdvancedOpen(true);
+  }, [error]);
 
-  // EULA acceptance is mirrored in the `EULA` env var (kept in the ENV list); the
-  // toggle below is just a friendly, explicit gate. Default is unaccepted so the
-  // acceptance is the user's affirmative act, not the panel's.
+  // EULA acceptance is backed by the `EULA` env var; the toggle is just an explicit gate,
+  // defaulting to unaccepted so acceptance is the user's affirmative act.
   const eulaAccepted = envRows.some(
     (r) => r.key.trim().toUpperCase() === 'EULA' && r.value.trim().toUpperCase() === 'TRUE'
   );
@@ -412,6 +424,19 @@ function ConfigModal({
     }
   };
   const eulaBlocked = !!requireEula && !eulaAccepted;
+
+  // Palworld admin password is backed by the PALWORLD_ADMIN_PASSWORD env var, so the
+  // dedicated field and the Environment Variables list stay in sync (like EULA).
+  const palworldAdminPassword =
+    envRows.find((r) => r.key.trim().toUpperCase() === 'PALWORLD_ADMIN_PASSWORD')?.value ?? '';
+  const setPalworldAdminPassword = (val: string) => {
+    const idx = envRows.findIndex((r) => r.key.trim().toUpperCase() === 'PALWORLD_ADMIN_PASSWORD');
+    if (idx >= 0) {
+      setEnvRows(envRows.map((r, i) => (i === idx ? { ...r, value: val } : r)));
+    } else {
+      setEnvRows([...envRows, { key: 'PALWORLD_ADMIN_PASSWORD', value: val }]);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
@@ -439,6 +464,61 @@ function ConfigModal({
               placeholder="My Game Server" className={inputCls} />
             {nameError && <p className="mt-1.5 text-xs text-red-400">{nameError}</p>}
           </div>
+
+          {showPalworldAdmin && (
+            <div>
+              <div className="relative mb-2 flex">
+                <span className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  Palworld Admin Password
+                  <AppButton
+                    tone="ghost"
+                    aria-label="About the admin password"
+                    aria-expanded={showAdminHelp}
+                    onClick={() => setShowAdminHelp((v) => !v)}
+                    className="inline-flex h-5 shrink-0 items-center justify-center px-0.5 text-[var(--color-cyan-400)]/80 transition-colors hover:text-[var(--color-cyan-400)]"
+                  >
+                    <Info className="h-3.5 w-3.5" />
+                  </AppButton>
+                </span>
+                {showAdminHelp && (
+                  <div className="absolute left-0 top-full z-20 mt-2 w-[280px] max-w-[calc(100vw-4rem)]">
+                    <div className="absolute -top-1.5 left-4 h-3 w-3 rotate-45 border-l border-t border-gray-700/80 bg-gp-surface-input" />
+                    <div className="relative rounded-xl border border-gray-700/80 bg-[linear-gradient(180deg,rgba(15,23,42,0.98),rgba(11,18,32,0.98))] px-3.5 py-3 text-xs font-normal normal-case tracking-normal leading-relaxed text-gray-300 shadow-[0_18px_40px_rgba(2,6,23,0.45)] backdrop-blur-sm">
+                      Used for in-game admin actions and the server&apos;s REST API. Leave empty to let the panel generate one. You can change it later in Container Settings.
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <input
+                    type={showAdminPw ? 'text' : 'password'}
+                    value={palworldAdminPassword ?? ''}
+                    onChange={(e) => setPalworldAdminPassword(e.target.value)}
+                    placeholder="Leave empty to auto-generate"
+                    spellCheck={false}
+                    autoComplete="off"
+                    className={`${inputCls} pr-10`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowAdminPw((v) => !v)}
+                    aria-label={showAdminPw ? 'Hide password' : 'Show password'}
+                    className="absolute inset-y-0 right-0 flex items-center px-3 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+                  >
+                    {showAdminPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPalworldAdminPassword(generatePalworldAdminPassword())}
+                  className="flex-shrink-0 rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-2 text-xs font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors"
+                >
+                  Regenerate
+                </button>
+              </div>
+            </div>
+          )}
 
           {mcServerType && onPickerEnvChange && (
             <div>
@@ -669,7 +749,7 @@ function ConfigModal({
   );
 }
 
-// ---------- LinuxGSM featured (Minecraft + CS2 removed — handled by OVHcloud) ----------
+// ---------- LinuxGSM featured ----------
 const LGSM_FEATURED = [
   '7 days to die', 'ark:', 'arma reforger', 'dayz',
   'garry', 'humanitz', 'palworld', 'project zomboid',
@@ -716,6 +796,7 @@ export function InstallGameServer({
   const [envRows, setEnvRows] = useState<EnvRow[]>([]);
   const [hytaleOptions, setHytaleOptions] = useState({ patchline: '', profileUuid: '' });
   const [showHytale, setShowHytale] = useState(false);
+  const [showPalworldAdmin, setShowPalworldAdmin] = useState(false);
   const [configError, setConfigError] = useState<string | null>(null);
   const [mountRows, setMountRows] = useState<MountRow[]>([]);
   const [healthcheckFromCatalog, setHealthcheckFromCatalog] = useState<Record<string, unknown> | null>(null);
@@ -778,10 +859,8 @@ export function InstallGameServer({
     );
   }, [pickerEnv]);
 
-  // Reset every transient field of the config flow to its baseline. Called at
-  // the start of each opener so state never leaks between two selections (e.g.
-  // a LinuxGSM Steam game leaving its credentials banner on a later OVHcloud
-  // game). Each opener then sets only the values specific to the chosen game.
+  // Reset every transient config field to baseline at the start of each opener so state never
+  // leaks between two selections. Each opener then sets only the chosen game's values.
   const resetConfigState = () => {
     setConfigTitle('');
     setConfigSubtitle('');
@@ -794,6 +873,7 @@ export function InstallGameServer({
     setEnvRows([]);
     setHytaleOptions({ patchline: '', profileUuid: '' });
     setShowHytale(false);
+    setShowPalworldAdmin(false);
     setConfigError(null);
     setMountRows([]);
     setHealthcheckFromCatalog(null);
@@ -829,11 +909,17 @@ export function InstallGameServer({
     setServerName(`${image.name} Server`);
     setTcpPorts(ports.tcp);
     setUdpPorts(ports.udp);
-    setEnvRows(envFromImage(image));
+    const baseEnv = envFromImage(image);
+    setEnvRows(
+      image.family === 'palworld'
+        ? [...baseEnv, { key: 'PALWORLD_ADMIN_PASSWORD', value: generatePalworldAdminPassword() }]
+        : baseEnv
+    );
     setConfigShowEnv(true);
     setConfigRequireEula(image.requiredEnvKeys.includes('EULA'));
     setShowHytale(image.supportsHytaleOptions);
     setHytaleOptions({ patchline: '', profileUuid: '' });
+    setShowPalworldAdmin(image.family === 'palworld');
     setConfigError(null);
     setMountRows(
       image.family === 'minecraft'
@@ -1395,6 +1481,7 @@ export function InstallGameServer({
           onHealthcheckChange={setHealthcheckEdit}
           hytaleOptions={showHytale ? hytaleOptions : undefined}
           setHytaleOptions={showHytale ? setHytaleOptions : undefined}
+          showPalworldAdmin={showPalworldAdmin}
           usedServerNames={usedServerNames}
           requireSteamCredentials={requireSteamCredentials || undefined}
           steamUsername={steamUsername}

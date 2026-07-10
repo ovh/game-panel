@@ -3,12 +3,14 @@ import { getOvhcloudMetadata } from '../../serverMetadata.js';
 import { counterStrike2Adapter } from './counterStrike2.js';
 import { hytaleAdapter } from './hytale.js';
 import { minecraftAdapter } from './minecraft.js';
+import { palworldAdapter } from './palworld.js';
 import type { OvhcloudImageAdapter } from './types.js';
 
 const KNOWN_OVHCLOUD_ADAPTERS: OvhcloudImageAdapter[] = [
     minecraftAdapter,
     counterStrike2Adapter,
     hytaleAdapter,
+    palworldAdapter,
 ];
 
 export function getKnownOvhcloudAdapters(): OvhcloudImageAdapter[] {

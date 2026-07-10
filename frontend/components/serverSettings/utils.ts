@@ -1,5 +1,5 @@
 import type { ReleaseConfigFileDefinition } from '../../utils/api';
-import { isServerStoppedStatus } from '../../utils/serverRuntime';
+import { isServerDownLike } from '../../utils/serverRuntime';
 
 export const normalizeConfigPath = (raw: string) => {
   const cleaned = String(raw || '')
@@ -88,7 +88,8 @@ export const getApiErrorMessage = (error: any): string => {
 };
 
 export const isServerBusyForFileMutations = (status: string | undefined): boolean => {
-  return !isServerStoppedStatus(status);
+  // Only up-like states (running/unhealthy) block file mutations.
+  return !isServerDownLike(status);
 };
 
 export const formatBytes = (bytes: number) => {

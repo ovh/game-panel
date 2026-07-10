@@ -14,7 +14,7 @@
 
 <br>
 
-OVHcloud Game Panel is an **open-source, self-hosted** control panel to deploy, run, and monitor your game servers — **without ever touching the command line**. Spin up a Minecraft, Counter-Strike 2, or Hytale server in a few clicks, then manage its files, backups, player access, and performance from a single modern dashboard. 🚀
+OVHcloud Game Panel is an **open-source, self-hosted** control panel to deploy, run, and monitor your game servers — **without ever touching the command line**. Spin up a Minecraft, Counter-Strike 2, Hytale, or Palworld server in a few clicks, then manage its files, backups, player access, and performance from a single modern dashboard. 🚀
 
 ## ✨ Features
 
@@ -34,9 +34,10 @@ OVHcloud Game Panel is an **open-source, self-hosted** control panel to deploy, 
 
 **Natively supported**, ready to deploy with OVHcloud-maintained images:
 
-- ⛏️ **Minecraft** — Java Edition, Paper, Fabric, NeoForge, and Bedrock Edition
-- 🔫 **Counter-Strike 2**
-- 🗡️ **Hytale**
+- **Minecraft** — Java Edition, Paper, Fabric, NeoForge, and Bedrock Edition
+- **Counter-Strike 2**
+- **Hytale**
+- **Palworld**
 
 **And many more.** Game Panel integrates the full [LinuxGSM](https://linuxgsm.com/servers/) library, giving you a huge catalogue of additional dedicated game servers out of the box.
 
