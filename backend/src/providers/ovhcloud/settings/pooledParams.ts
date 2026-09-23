@@ -2,8 +2,43 @@ export type PooledToken =
     | { kind: 'param'; key: string; value: string }
     | { kind: 'flag'; value: string };
 
+function splitPooledWords(raw: string): string[] {
+    const words: string[] = [];
+    let current = '';
+    let started = false;
+    let quoted = false;
+
+    for (const char of String(raw ?? '')) {
+        if (char === '"') {
+            quoted = !quoted;
+            started = true;
+            continue;
+        }
+
+        if (!quoted && /\s/.test(char)) {
+            if (started) {
+                words.push(current);
+                current = '';
+                started = false;
+            }
+            continue;
+        }
+
+        current += char;
+        started = true;
+    }
+
+    if (started) words.push(current);
+
+    return words;
+}
+
+function renderPooledValue(value: string): string {
+    return /\s/.test(value) ? `"${value}"` : value;
+}
+
 export function parsePooledParams(raw: string): PooledToken[] {
-    const words = String(raw ?? '').split(/\s+/).filter(Boolean);
+    const words = splitPooledWords(raw);
     const tokens: PooledToken[] = [];
 
     for (let i = 0; i < words.length; i += 1) {
@@ -29,7 +64,7 @@ export function parsePooledParams(raw: string): PooledToken[] {
 
 export function serializePooledParams(tokens: PooledToken[]): string {
     return tokens
-        .map((token) => (token.kind === 'flag' ? token.value : `+${token.key} ${token.value}`.trim()))
+        .map((token) => (token.kind === 'flag' ? token.value : `+${token.key} ${renderPooledValue(token.value)}`.trim()))
         .filter(Boolean)
         .join(' ');
 }

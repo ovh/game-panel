@@ -1,6 +1,26 @@
 # 📋 Changelog
 
-## v1.5.0 — 2026-09-09
+## v1.6.0 — 2026-09-22
+
+Adds **Garry's Mod** and shows the **players connected** to each of your game servers, live.
+
+### ✨ Added
+
+- **Garry's Mod** — new OVHcloud game server image with full panel integration: installation with Steam branch selection and optional Counter-Strike: Source content, game settings, console commands, hard wipe, and Steam Workshop collection support.
+- **Online players** — the game server list now shows how many players are connected to each server, live, in both the table and the grid view. Click the count to see who is online. Available on the compatible games; who can open the list is controlled by a new per-server permission.
+
+### 🔧 Changed
+
+- Minor UI polish and consistency improvements.
+
+### 🐛 Fixed
+
+- **Installation — domain check** — installing on a machine whose `/etc/hosts` maps the domain to a loopback address used to fail with a generic domain/IP mismatch; the installer now names the actual cause and how to fix it.
+- **Counter-Strike 2 — server name** — a server name containing spaces is now kept whole instead of being cut at the first space when the settings are saved.
+- **Updates — environment file** — the file holding the panel's settings is now completed by the same step that generates the container stack, so a panel updated from an older version can no longer end up missing a value the new stack expects.
+- Various minor UI fixes.
+
+## v1.5.0 — 2026-09-10
 
 Adds **Valheim**, rebuilds the **game settings** screen for every OVHcloud game, and puts the panel and its game servers on a **shared Docker network**.
 

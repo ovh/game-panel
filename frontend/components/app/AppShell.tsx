@@ -17,7 +17,7 @@ import { AppPageLayout } from '../../src/ui/layout';
 
 const HostStatus = lazy(() => import('../HostStatus').then((m) => ({ default: m.HostStatus })));
 import type { CLIMessage } from '../../types/cli';
-import type { GameServer, InstallInteraction, InstallStep } from '../../types/gameServer';
+import type { GameServer, InstallInteraction, InstallStep, ServerPlayers } from '../../types/gameServer';
 import type { AuthUser } from '../../utils/permissions';
 import type { InstallGameHandlerPayload } from './appActionHandlers';
 import type {
@@ -43,6 +43,7 @@ interface AppShellProps {
   pageShellClassName: string;
   gameServers: GameServer[];
   serverMetricsHistoryById: Record<string, ServerMetricHistoryPoint[]>;
+  serversPlayersById: Record<string, ServerPlayers>;
   onLoadServerMetricsHistory: (serverId: string) => void;
   serverHistoryById: ServerHistoryById;
   gameNamesByKey: Record<string, string>;
@@ -103,6 +104,7 @@ export function AppShell({
   pageShellClassName,
   gameServers,
   serverMetricsHistoryById,
+  serversPlayersById,
   onLoadServerMetricsHistory,
   serverHistoryById,
   gameNamesByKey,
@@ -271,6 +273,7 @@ export function AppShell({
             <GameServersTable
               servers={gameServers}
               metricsHistoryByServer={serverMetricsHistoryById}
+              playersByServer={serversPlayersById}
               onLoadMetricsHistory={onLoadServerMetricsHistory}
               historyByServer={serverHistoryById}
               gameNamesByKey={gameNamesByKey}

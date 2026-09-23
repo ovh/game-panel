@@ -310,16 +310,6 @@ export const serverPresetValues = new Set([
   ...PROJECT_ZOMBOID_OVHCLOUD_OPTIONS.map((option) => option.value),
   '*',
 ]);
-export function parsePermissionList(value: string): string[] {
-  return Array.from(
-    new Set(
-      value
-        .split(/[\n,]/g)
-        .map((entry) => entry.trim())
-        .filter(Boolean)
-    )
-  );
-}
 
 export function normalizePermissions(values: string[]): string[] {
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));

@@ -18,7 +18,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import type { GameServer } from '../../types/gameServer';
+import type { GameServer, ServerPlayers } from '../../types/gameServer';
 import type { AuthUser } from '../../utils/permissions';
 import { AppButton, AppInput, AppTable } from '../../src/ui/components';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -31,6 +31,8 @@ import {
 } from '../../utils/serverRuntime';
 import {
   formatNetworkSpeed,
+  formatPlayerCount,
+  playersHaveNames,
   type MetricType,
   type SortField,
   type SortOrder,
@@ -51,6 +53,9 @@ interface GameServersDesktopTableProps {
   filteredAndSortedServers: GameServer[];
   currentUser?: AuthUser | null;
   permissionsByServer?: Record<string, string[]>;
+  players?: Record<string, ServerPlayers>;
+  showPlayers?: boolean;
+  onOpenPlayers?: (serverId: string) => void;
   borderColor: string;
   rowBorder: string;
   textPrimary: string;
@@ -99,6 +104,9 @@ export function GameServersDesktopTable({
   filteredAndSortedServers,
   currentUser,
   permissionsByServer,
+  players,
+  showPlayers = false,
+  onOpenPlayers,
   borderColor,
   rowBorder,
   textPrimary,
@@ -229,6 +237,9 @@ export function GameServersDesktopTable({
                 {getSortIcon(sortField, sortOrder, 'status')}
               </AppButton>
             </th>
+            {showPlayers && (
+              <th className={`text-left ${textTertiary} text-xs font-semibold uppercase tracking-wider py-3 px-4`}>Players</th>
+            )}
             <th className={`text-left ${textTertiary} text-xs font-semibold uppercase tracking-wider py-3 px-4`}>
               <div className="flex items-center gap-1.5">
                 Server Metrics
@@ -298,7 +309,7 @@ export function GameServersDesktopTable({
         <tbody>
           {filteredAndSortedServers.length === 0 && (
             <tr>
-              <td colSpan={8} className="py-12 text-center">
+              <td colSpan={showPlayers ? 9 : 8} className="py-12 text-center">
                 <p className={`text-sm ${textTertiary}`}>No game servers yet.</p>
                 <p className={`mt-1 text-xs ${textTertiary}`}>
                   Use “Add Game Server” below to install your first one.
@@ -310,6 +321,9 @@ export function GameServersDesktopTable({
             const { normalizedStatus, label: statusLabel, className: statusClassName } =
               getServerStatusPresentation(server.status);
             const connectionCopyState = server.port ? getConnectionCopyState(server.port) : 'idle';
+            const serverPlayers = players?.[server.id];
+            const playersLabel = formatPlayerCount(serverPlayers);
+            const playersClickable = playersHaveNames(serverPlayers);
             const isUpLike = isServerUpLike(server.status);
             const isDownLike = isServerDownLike(server.status);
             const isCreating = isServerCreatingStatus(server.status);
@@ -456,6 +470,24 @@ export function GameServersDesktopTable({
                   </AppButton>
                   </div>
                 </td>
+                {showPlayers && (
+                  <td className="py-4 px-4">
+                    {playersClickable ? (
+                      <button
+                        type="button"
+                        onClick={() => onOpenPlayers?.(server.id)}
+                        className={`cursor-pointer text-sm ${textPrimary} transition-colors hover:text-[var(--color-cyan-400)]`}
+                        title="Show connected players"
+                      >
+                        {playersLabel}
+                      </button>
+                    ) : (
+                      <span className={`text-sm ${playersLabel === '–' ? textTertiary : textSecondary}`}>
+                        {playersLabel}
+                      </span>
+                    )}
+                  </td>
+                )}
                 <td className="py-4 px-4">
                   {isServerUpLike(server.status) ? (
                     <div className="flex flex-col gap-0.5 min-w-[185px]">

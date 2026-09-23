@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Login } from './components/Login';
 import { ThemeProvider } from './contexts/ThemeContext';
-import { type GameServer } from './types/gameServer';
+import { type GameServer, type ServerPlayers } from './types/gameServer';
 import { apiClient } from './utils/api';
 import { METRICS_HISTORY_REQUEST_LIMIT } from './components/gameServersTable/utils';
 import { clearAppCache } from './utils/appStorage';
@@ -77,6 +77,7 @@ function AppContent() {
   const [serverMetricsHistoryById, setServerMetricsHistoryById] = useState<
     Record<string, ServerMetricHistoryPoint[]>
   >({});
+  const [serversPlayersById, setServersPlayersById] = useState<Record<string, ServerPlayers>>({});
   const [gameNamesByKey, setGameNamesByKey] = useState<Record<string, string>>({});
   const [logPromptRules, setLogPromptRules] = useState<LogPromptRule[]>([]);
   const serversRef = useRef<GameServer[]>([]);
@@ -230,7 +231,11 @@ function AppContent() {
   useEffect(() => {
     if (!authReady || !isAuthenticated || activeTab !== 'game-servers') return;
     apiClient.subscribeServersMetrics();
-    return () => apiClient.unsubscribeServersMetrics();
+    apiClient.subscribeServersPlayers();
+    return () => {
+      apiClient.unsubscribeServersMetrics();
+      apiClient.unsubscribeServersPlayers();
+    };
   }, [authReady, isAuthenticated, activeTab]);
 
   // The graph pulls its own 24h history; the fleet ticks then keep it advancing.
@@ -609,6 +614,7 @@ function AppContent() {
     setGameServers,
     fleetMetricsRef,
     setServerMetricsHistoryById,
+    setServersPlayersById,
     addServerHistoryEntries,
     suppressReplayAfterClearRef,
     replaceServerLogs,
@@ -697,6 +703,7 @@ function AppContent() {
       pageShellClassName={pageShellClassName}
       gameServers={gameServers}
       serverMetricsHistoryById={serverMetricsHistoryById}
+      serversPlayersById={serversPlayersById}
       onLoadServerMetricsHistory={loadServerMetricsHistory}
       serverHistoryById={serverHistoryById}
       gameNamesByKey={gameNamesByKey}

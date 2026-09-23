@@ -7,6 +7,7 @@ import { HytaleSections, type HytaleSectionsProps } from './serverSettings/Hytal
 import { PalworldSections, type PalworldSectionsProps } from './serverSettings/PalworldTab';
 import { ProjectZomboidSections, type ProjectZomboidSectionsProps } from './serverSettings/ProjectZomboidTab';
 import { CS2Sections, type CS2SectionsProps } from './serverSettings/CS2ConfigTab';
+import { GarrysModSections, type GarrysModSectionsProps } from './serverSettings/GarrysModTab';
 import { RustSections, type RustSectionsProps } from './serverSettings/RustTab';
 import { ValheimSections, type ValheimSectionsProps } from './serverSettings/ValheimTab';
 import { AppButton, AppInput, AppSelect, AppSlider, AppToggle, InfoTip } from '../src/ui/components';
@@ -47,6 +48,7 @@ interface GameConfigTabProps {
   palworldProps?: PalworldSectionsProps | null;
   projectZomboidProps?: ProjectZomboidSectionsProps | null;
   cs2Props?: CS2SectionsProps | null;
+  garrysModProps?: GarrysModSectionsProps | null;
   rustProps?: RustSectionsProps | null;
   valheimProps?: ValheimSectionsProps | null;
   ovhcloudConfigFiles?: string[];
@@ -166,6 +168,7 @@ export function GameConfigTab({
   palworldProps,
   projectZomboidProps,
   cs2Props,
+  garrysModProps,
   rustProps,
   valheimProps,
   ovhcloudConfigFiles,
@@ -673,7 +676,7 @@ export function GameConfigTab({
   const borderColor = 'border-gray-700';
   const textPrimary = 'text-white';
   const textSecondary = 'text-gray-400';
-  const hasGameConfiguration = detectedConfigFiles.length > 0 || verifiedConfigFiles.length > 0 || Boolean(minecraftProps) || Boolean(hytaleProps) || Boolean(palworldProps) || Boolean(projectZomboidProps) || Boolean(cs2Props) || Boolean(rustProps) || Boolean(valheimProps);
+  const hasGameConfiguration = detectedConfigFiles.length > 0 || verifiedConfigFiles.length > 0 || Boolean(minecraftProps) || Boolean(hytaleProps) || Boolean(palworldProps) || Boolean(projectZomboidProps) || Boolean(cs2Props) || Boolean(garrysModProps) || Boolean(rustProps) || Boolean(valheimProps);
   const showSaveSuccessToast = Boolean(saveSuccessMessage && !configChanged);
   const showBottomStatusPanel = Boolean(saveError);
 
@@ -962,6 +965,16 @@ export function GameConfigTab({
             </div>
           )}
 
+          {garrysModProps && (
+            <div className="px-1 sm:px-2">
+              <GarrysModSections
+                {...garrysModProps}
+                canReadFileManager={canReadFileManager}
+                onOpenFileManagerPath={openFileInFileManager}
+              />
+            </div>
+          )}
+
           {rustProps && (
             <div className="px-1 sm:px-2">
               <RustSections
@@ -982,7 +995,7 @@ export function GameConfigTab({
             </div>
           )}
 
-          {!minecraftProps && !hytaleProps && !palworldProps && !projectZomboidProps && !cs2Props && !rustProps && !valheimProps && (
+          {!minecraftProps && !hytaleProps && !palworldProps && !projectZomboidProps && !cs2Props && !garrysModProps && !rustProps && !valheimProps && (
             <GameConfigAdvancedLinks
               configFiles={detectedConfigFiles}
               isLoading={configFilesLoading}

@@ -879,6 +879,14 @@ class ApiClient {
     this.realtime.unsubscribeServersMetrics();
   }
 
+  subscribeServersPlayers() {
+    this.realtime.subscribeServersPlayers();
+  }
+
+  unsubscribeServersPlayers() {
+    this.realtime.unsubscribeServersPlayers();
+  }
+
   // 24h history of one server, downsampled by the backend. Fetched when a graph opens.
   async getServerMetrics(serverId: number, limit = 2000) {
     const response = await this.client.get(`/api/servers/${serverId}/metrics`, { params: { limit } });
@@ -1370,8 +1378,6 @@ class ApiClient {
     });
     return response.data;
   }
-
-  // ── Valheim OVHcloud ──────────────────────────────────────────────────────
 
   async getValheimFrameworks(serverId: number) {
     const response = await this.client.get(`/api/servers/${serverId}/valheim/frameworks`);

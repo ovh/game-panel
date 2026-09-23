@@ -19,6 +19,7 @@ import { projectZomboidFileSettingsAccessor } from '../images/projectZomboid/set
 import { resolveProjectZomboidSoftWipeTargets } from '../images/projectZomboid/wipe.js';
 import { PERMISSIONS } from '../../../permissions.js';
 import { OVHCLOUD_DOCKER_STOP_TIMEOUT_SECONDS } from './common.js';
+import { projectZomboidPlayersSupport } from '../images/projectZomboid/onlinePlayers.js';
 import type { OvhcloudImageAdapter, OvhcloudInstallResolution } from './types.js';
 
 export const projectZomboidAdapter: OvhcloudImageAdapter = {
@@ -60,6 +61,8 @@ export const projectZomboidAdapter: OvhcloudImageAdapter = {
     routes: [
         { path: '/project-zomboid', router: projectZomboidRoutes },
     ],
+
+    players: projectZomboidPlayersSupport,
 
     supportsImageId(imageId: string): boolean {
         return Boolean(getOvhcloudProjectZomboidImage(imageId));

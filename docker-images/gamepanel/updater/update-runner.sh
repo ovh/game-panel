@@ -118,18 +118,10 @@ update_job "running" "syncing_sources" "Syncing updated source files" "" "$backu
 SOURCE_ROOT="$REPO_DIR"
 sync_project_sources
 
-append_env_if_missing "GAMEPANEL_APP_ROOT" "$APP_ROOT"
-append_env_if_missing "GAMEPANEL_REPOSITORY_URL" "$GP_UPDATE_REPO_URL"
-
 render_compose_if_available
 
 update_job "running" "running_deploy_migrations" "Running deploy migrations"
 run_deploy_migrations
-
-update_job "running" "building_stack" "Building updated containers"
-if compose_cmd config --services | grep -qx 'updater'; then
-  compose_cmd build updater || warn "Updater image build failed; continuing with stack rebuild."
-fi
 
 update_job "running" "restarting_stack" "Rebuilding and restarting Game Panel stack"
 compose_cmd build --pull

@@ -51,9 +51,15 @@ export const OVH_UNIFIED: OvhUnifiedEntry[] = [
     hasVersionSelection: false,
     images: OVHCLOUD_IMAGES.filter(img => img.family === 'valheim'),
   },
+  {
+    id: 'garrys-mod',
+    displayName: "Garry's Mod",
+    hasVersionSelection: false,
+    images: OVHCLOUD_IMAGES.filter(img => img.family === 'garrys-mod'),
+  },
 ];
 
-const LGSM_SUPPRESS_SHORTNAMES = new Set(['cs2', 'mc', 'mcb', 'pmc', 'pw', 'pz', 'rust', 'vh']);
+const LGSM_SUPPRESS_SHORTNAMES = new Set(['cs2', 'gmod', 'mc', 'mcb', 'pmc', 'pw', 'pz', 'rust', 'vh']);
 
 export function filterLgsmForUnified(games: LinuxGsmGame[]): LinuxGsmGame[] {
   return games.filter(g => !LGSM_SUPPRESS_SHORTNAMES.has(g.shortname));

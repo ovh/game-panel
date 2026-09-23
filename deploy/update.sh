@@ -25,62 +25,6 @@ parse_args() {
   done
 }
 
-generate_secret() {
-  if command -v openssl >/dev/null 2>&1; then
-    openssl rand -hex 48
-    return
-  fi
-
-  if command -v python3 >/dev/null 2>&1; then
-    python3 - <<'PY'
-import secrets
-print(secrets.token_hex(48))
-PY
-    return
-  fi
-
-  tr -dc 'A-Fa-f0-9' </dev/urandom | head -c 96
-}
-
-generate_uuid() {
-  if command -v uuidgen >/dev/null 2>&1; then
-    uuidgen | tr '[:upper:]' '[:lower:]'
-    return
-  fi
-
-  if [[ -r /proc/sys/kernel/random/uuid ]]; then
-    cat /proc/sys/kernel/random/uuid
-    return
-  fi
-
-  if command -v python3 >/dev/null 2>&1; then
-    python3 - <<'PY'
-import uuid
-print(str(uuid.uuid4()))
-PY
-    return
-  fi
-
-  die "Unable to generate a UUID (missing uuidgen, /proc/sys/kernel/random/uuid, and python3)."
-}
-
-ensure_runtime_env_defaults() {
-  local current_db_api_base_url=""
-
-  current_db_api_base_url="$(read_env_raw_value 'VITE_DB_API_BASE_URL')"
-  if [[ -z "$current_db_api_base_url" ]]; then
-    current_db_api_base_url="https://db.gamepanel.ovh/"
-  fi
-
-  append_env_if_missing 'APP_INSTANCE_ID' "$(generate_uuid)"
-  append_env_if_missing 'APP_INSTANCE_SECRET' "$(generate_secret)"
-  append_env_if_missing 'TRUST_PROXY' "1"
-  append_env_if_missing 'TELEMETRY_ENABLED' "true"
-  append_env_if_missing 'TELEMETRY_API_BASE_URL' "$current_db_api_base_url"
-  append_env_if_missing 'GAMEPANEL_APP_ROOT' "$APP_ROOT"
-  append_env_if_missing 'GAMEPANEL_REPOSITORY_URL' "https://github.com/ovh/game-panel.git"
-}
-
 wait_for_stack() {
   local max_attempts=60
   local sleep_seconds=2
@@ -102,12 +46,11 @@ wait_for_stack() {
 
     if [[ -n "$backend_id" && -n "$frontend_id" && -n "$traefik_id" ]]; then
       if wait_for_panel_http 90; then
-        return
+        return 0
       fi
 
       warn "The stack is up but the panel is not reachable through Traefik."
-      warn "If it stays unreachable, restore the previous version with: sudo bash deploy/rollback.sh"
-      return
+      return 1
     fi
 
     sleep "$sleep_seconds"
@@ -115,6 +58,7 @@ wait_for_stack() {
 
   warn "Stack did not become fully ready in time. Current status:"
   compose_cmd ps || true
+  return 1
 }
 
 main() {
@@ -142,7 +86,6 @@ main() {
   [[ -f "$COMPOSE_FILE" ]] || die "Missing compose file: $COMPOSE_FILE (run install first)."
 
   ensure_docker_stack
-  ensure_compose_traefik_image "$COMPOSE_FILE"
 
   log "Using local source tree from $LOCAL_SOURCE_ROOT."
   SOURCE_ROOT="$LOCAL_SOURCE_ROOT"
@@ -158,7 +101,6 @@ main() {
   log "Backup created: $backup_path"
 
   sync_project_sources
-  ensure_runtime_env_defaults
 
   render_compose_if_available
 
@@ -172,11 +114,17 @@ main() {
   compose_cmd build --pull
   compose_cmd up -d --remove-orphans
 
-  wait_for_stack
-  send_panel_updated_event
+  local stack_ready=0
+  wait_for_stack || stack_ready=1
 
   printf '\n'
-  log "Update complete."
+  if [[ "$stack_ready" -eq 0 ]]; then
+    send_panel_updated_event
+    log "Update complete."
+  else
+    warn "Update finished but the panel did not answer; this installation may be broken."
+    warn "If it stays unreachable, restore the previous version with: sudo bash deploy/rollback.sh"
+  fi
   printf 'Compose project: %s\n' "$COMPOSE_PROJECT_NAME"
   printf 'Compose file: %s\n' "$COMPOSE_FILE"
 }

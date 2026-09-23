@@ -70,6 +70,18 @@ is_valid_ipv6() {
   return 0
 }
 
+is_loopback_ipv4() {
+  local ip="$1"
+  [[ "$ip" =~ ^127\. ]] || return 1
+  return 0
+}
+
+is_loopback_ipv6() {
+  local ip="$1"
+  [[ "$ip" == "::1" || "$ip" == "0:0:0:0:0:0:0:1" ]] || return 1
+  return 0
+}
+
 unique_lines() {
   awk 'NF && !seen[$0]++'
 }
@@ -94,7 +106,7 @@ resolve_domain_ipv6() {
   fi
 
   if command -v getent >/dev/null 2>&1; then
-    getent ahostsv6 "$domain" 2>/dev/null | awk '{print $1}'
+    getent ahostsv6 "$domain" 2>/dev/null | awk '{print $1}' | grep -v '^::ffff:' || true
   fi
 }
 
@@ -165,6 +177,23 @@ lists_intersect() {
   return 1
 }
 
+lists_all_loopback() {
+  local list_a="$1"
+  local list_b="$2"
+  local ip
+  local seen=1
+
+  for ip in $list_a; do
+    is_loopback_ipv4 "$ip" || return 1
+    seen=0
+  done
+  for ip in $list_b; do
+    is_loopback_ipv6 "$ip" || return 1
+    seen=0
+  done
+  return $seen
+}
+
 verify_domain_points_to_machine() {
   local domain="$1"
 
@@ -203,6 +232,10 @@ verify_domain_points_to_machine() {
     if lists_intersect "$domain_v6_list" "$host_v6_list"; then
       match_found=1
     fi
+  fi
+
+  if [[ $match_found -eq 0 ]] && lists_all_loopback "$domain_v4_list" "$domain_v6_list"; then
+    die "Domain '$domain' resolves to a loopback address [$(array_join ', ' "${domain_ipv4[@]}" "${domain_ipv6[@]}")] instead of this machine's public IP. This usually means /etc/hosts maps '$domain' to 127.0.1.1, which shadows the public DNS records (check with: getent hosts '$domain'). Remove that name from /etc/hosts, or re-run with --skip-domain-ip-check."
   fi
 
   if [[ $match_found -eq 0 ]]; then
@@ -437,6 +470,27 @@ sync_project_sources() {
     | tar -C "$APP_SOURCE_DIR" -xf -
 }
 
+seed_deploy_migrations_ledger() {
+  local migrations_dir="$APP_SOURCE_DIR/deploy/migrations"
+  local applied_file="$DATA_DIR/deploy-migrations.applied"
+  local migration
+
+  [[ -d "$migrations_dir" ]] || return 0
+
+  if [[ -e "$applied_file" ]]; then
+    return
+  fi
+
+  : >"$applied_file"
+  for migration in "$migrations_dir"/*.sh; do
+    [[ -f "$migration" ]] || continue
+    basename "$migration" .sh >>"$applied_file"
+  done
+
+  chown root:"$APP_GROUP" "$applied_file"
+  chmod 0644 "$applied_file"
+}
+
 write_env_file() {
   local jwt_secret="$1"
   local instance_id="$2"
@@ -625,6 +679,7 @@ main() {
 
   create_runtime_dirs
   sync_project_sources
+  seed_deploy_migrations_ledger
 
   JWT_SECRET="${GP_JWT_SECRET:-$(generate_secret)}"
   APP_INSTANCE_ID="${GP_APP_INSTANCE_ID:-$(generate_uuid)}"

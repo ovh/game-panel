@@ -8,6 +8,10 @@ export const LAUNCH_TOKEN_PATTERN = '^[^\\s"\'`$&;|<>(){}\\[\\]*?~#!\\\\]*$';
 export const LAUNCH_TOKEN_MESSAGE =
     'Spaces and shell characters are not allowed in a launch parameter (the game server splits them into separate arguments).';
 
+export const LAUNCH_PHRASE_PATTERN = '^[^"\'`$&;|<>(){}\\[\\]*?~#!\\\\]*$';
+export const LAUNCH_PHRASE_MESSAGE =
+    'Quotes and shell characters are not allowed in a launch parameter.';
+
 export function invalidSettingInput(message: string): never {
     throw Object.assign(new Error(message), { statusCode: 400 });
 }

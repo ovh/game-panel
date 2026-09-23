@@ -129,8 +129,9 @@ export async function userHasServerPermission(
   return perms.includes('*') || perms.includes(permission);
 }
 
-export async function buildServerEnvVisibility(
-  user: { userId?: number; isRoot?: boolean } | undefined
+export async function buildServerPermissionVisibility(
+  user: { userId?: number; isRoot?: boolean } | undefined,
+  permission: string
 ): Promise<(serverId: number) => boolean> {
   if (user?.isRoot) return () => true;
   if (!user?.userId) return () => false;
@@ -149,12 +150,18 @@ export async function buildServerEnvVisibility(
     } catch {
       // Treat unparseable permissions as none.
     }
-    if (perms.includes('*') || perms.includes(PERMISSIONS.server.env)) {
+    if (perms.includes('*') || perms.includes(permission)) {
       allowed.add(membership.server_id);
     }
   }
 
   return (serverId: number) => allowed.has(serverId);
+}
+
+export async function buildServerEnvVisibility(
+  user: { userId?: number; isRoot?: boolean } | undefined
+): Promise<(serverId: number) => boolean> {
+  return buildServerPermissionVisibility(user, PERMISSIONS.server.env);
 }
 
 type HttpError = Error & {

@@ -18,6 +18,7 @@ import { palworldFileSettingsAccessor } from '../images/palworld/settings.js';
 import { resolvePalworldSoftWipeTargets } from '../images/palworld/wipe.js';
 import { PERMISSIONS } from '../../../permissions.js';
 import { OVHCLOUD_DOCKER_STOP_TIMEOUT_SECONDS } from './common.js';
+import { palworldPlayersSupport } from '../images/palworld/onlinePlayers.js';
 import type { OvhcloudImageAdapter, OvhcloudInstallResolution } from './types.js';
 
 export const palworldAdapter: OvhcloudImageAdapter = {
@@ -58,6 +59,8 @@ export const palworldAdapter: OvhcloudImageAdapter = {
         launch: palworldLaunchSettingsAccessor,
         configFiles: palworldConfigFiles,
     },
+
+    players: palworldPlayersSupport,
 
     supportsImageId(imageId: string): boolean {
         return Boolean(getOvhcloudPalworldImage(imageId));

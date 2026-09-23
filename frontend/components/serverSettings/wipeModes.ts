@@ -16,6 +16,7 @@ const MODES_BY_FAMILY: Record<string, WipeMode[]> = {
   minecraft: ['soft', 'hard'],
   hytale: ['soft'],
   'counter-strike': ['hard'],
+  'garrys-mod': ['hard'],
   palworld: ['soft', 'hard'],
   'project-zomboid': ['soft', 'hard'],
   rust: ['soft', 'hard'],

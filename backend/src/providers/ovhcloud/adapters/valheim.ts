@@ -18,6 +18,7 @@ import { valheimLaunchSettingsAccessor } from '../images/valheim/launchSettings.
 import { resolveValheimSoftWipeTargets } from '../images/valheim/wipe.js';
 import valheimRoutes from '../images/valheim/routes.js';
 import { OVHCLOUD_DOCKER_STOP_TIMEOUT_SECONDS } from './common.js';
+import { valheimPlayersSupport } from '../images/valheim/onlinePlayers.js';
 import type { OvhcloudImageAdapter, OvhcloudInstallResolution } from './types.js';
 
 export const valheimAdapter: OvhcloudImageAdapter = {
@@ -48,6 +49,8 @@ export const valheimAdapter: OvhcloudImageAdapter = {
     routes: [
         { path: '/valheim', router: valheimRoutes },
     ],
+
+    players: valheimPlayersSupport,
 
     supportsImageId(imageId: string): boolean {
         return Boolean(getOvhcloudValheimImage(imageId));

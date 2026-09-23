@@ -4,7 +4,7 @@ ARG IMAGE_CREATED="unknown"
 ARG IMAGE_REVISION="unknown"
 ARG IMAGE_VERSION="dev"
 ARG IMAGE_SOURCE="https://github.com/ovh/game-panel"
-ARG WEBSOCAT_VERSION=v1.13.0
+ARG WEBSOCAT_VERSION=v1.14.1
 
 LABEL org.opencontainers.image.title="Rust Server Image" \
    org.opencontainers.image.description="Game Panel image for Rust dedicated servers." \

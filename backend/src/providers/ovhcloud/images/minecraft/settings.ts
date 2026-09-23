@@ -157,6 +157,15 @@ const MINECRAFT_JAVA_SETTING_DEFINITIONS: SettingDefinition[] = [
         type: 'boolean',
     },
     {
+        key: 'enable-query',
+        group: 'network',
+        label: 'GS4 query protocol',
+        description:
+            'Opens the query listener used by server trackers. The panel also uses it to list '
+            + 'every connected player.',
+        type: 'boolean',
+    },
+    {
         key: 'require-resource-pack',
         group: 'branding',
         label: 'Require resource pack',

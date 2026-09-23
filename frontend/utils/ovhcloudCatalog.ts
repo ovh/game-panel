@@ -8,7 +8,7 @@ export interface OvhcloudPort {
 export interface OvhcloudImage {
   imageId: string;
   name: string;
-  family: 'minecraft' | 'counter-strike' | 'hytale' | 'palworld' | 'project-zomboid' | 'rust' | 'valheim';
+  family: 'minecraft' | 'counter-strike' | 'hytale' | 'palworld' | 'project-zomboid' | 'rust' | 'valheim' | 'garrys-mod';
   dockerImage: string;
   defaultTcpPorts: OvhcloudPort[];
   defaultUdpPorts: OvhcloudPort[];
@@ -192,7 +192,7 @@ export const OVHCLOUD_IMAGES: OvhcloudImage[] = [
       { port: 28015, label: 'Game' },
       { port: 28017, label: 'Steam Query' },
     ],
-    defaultEnv: {},
+    defaultEnv: { RUST_UPDATE_ON_START: 'false' },
     requiredEnvKeys: [],
     supportsHytaleOptions: false,
   },
@@ -213,15 +213,26 @@ export const OVHCLOUD_IMAGES: OvhcloudImage[] = [
       VALHEIM_SERVER_NAME: 'Valheim Server',
       VALHEIM_WORLD_NAME: 'Dedicated',
       VALHEIM_PUBLIC: '1',
+      VALHEIM_UPDATE_ON_START: 'false',
     },
     requiredEnvKeys: [],
     supportsHytaleOptions: false,
   },
-];
 
-export const OVHCLOUD_IMAGES_BY_ID = Object.fromEntries(
-  OVHCLOUD_IMAGES.map((image) => [image.imageId, image])
-);
+  {
+    imageId: 'garrys-mod',
+    name: "Garry's Mod",
+    family: 'garrys-mod',
+    dockerImage: ovhImage('gamepanel-garrys-mod'),
+    defaultTcpPorts: [],
+    defaultUdpPorts: [{ port: 27015, label: 'Game' }],
+    // Sent at install (see garrys-mod-frontend.md §3.1). GMOD_MOUNT_CSS is cheaper to decide
+    // here than later; everything else is configured post-install via the settings screen.
+    defaultEnv: { GMOD_MOUNT_CSS: 'false', GMOD_UPDATE_ON_START: 'true' },
+    requiredEnvKeys: [],
+    supportsHytaleOptions: false,
+  },
+];
 
 // The Java variant of a Minecraft image is the image itself: we ship one per
 // (server type × Java major), named "minecraft-<type>-java<N>". Given any variant,

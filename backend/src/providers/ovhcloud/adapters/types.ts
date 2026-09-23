@@ -8,6 +8,7 @@ import type { NormalizedPorts } from '../../../utils/ports.js';
 import type { NormalizedResourceLimits } from '../../../utils/resourceLimits.js';
 import type { GameServerRow } from '../../../types/gameServer.js';
 import type { InstallStep } from '../../../services/installPlan.js';
+import type { PlayersQueryTarget, PlayersSample } from '../../../services/players/types.js';
 import type { OvhcloudSettingsSupport } from '../settings/types.js';
 import type { FsEntry } from '../../../utils/fsBrowser.js';
 
@@ -98,6 +99,13 @@ export type OvhcloudConsoleSupport = {
     workdir?: string;
 };
 
+export type OvhcloudPlayersSupport = {
+    minIntervalMs?: number;
+    resolvePort(server: GameServerRow): number | null;
+    query(server: GameServerRow, target: PlayersQueryTarget): Promise<PlayersSample>;
+    sanitize?(server: GameServerRow, sample: PlayersSample): PlayersSample | null;
+};
+
 export type OvhcloudWipeSupport = {
     soft?(server: GameServerRow): Promise<string[]> | string[];
     hard?: boolean;
@@ -124,6 +132,7 @@ export type OvhcloudImageAdapter = {
     lifecycle?: OvhcloudLifecycleSupport;
     console?: OvhcloudConsoleSupport | ((server: GameServerRow) => OvhcloudConsoleSupport | undefined);
     wipe?: OvhcloudWipeSupport;
+    players?: OvhcloudPlayersSupport;
     settings?: OvhcloudSettingsSupport;
     installSteps?: InstallStep[];
     routes?: OvhcloudFeatureRoute[];

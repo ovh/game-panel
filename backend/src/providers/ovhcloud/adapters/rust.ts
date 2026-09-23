@@ -19,6 +19,7 @@ import { rustFileSettingsAccessor } from '../images/rust/settings.js';
 import { resolveRustSoftWipeTargets } from '../images/rust/wipe.js';
 import { PERMISSIONS } from '../../../permissions.js';
 import { OVHCLOUD_DOCKER_STOP_TIMEOUT_SECONDS } from './common.js';
+import { rustPlayersSupport } from '../images/rust/onlinePlayers.js';
 import type { OvhcloudImageAdapter, OvhcloudInstallResolution } from './types.js';
 
 export const rustAdapter: OvhcloudImageAdapter = {
@@ -60,6 +61,8 @@ export const rustAdapter: OvhcloudImageAdapter = {
     routes: [
         { path: '/rust', router: rustRoutes },
     ],
+
+    players: rustPlayersSupport,
 
     supportsImageId(imageId: string): boolean {
         return Boolean(getOvhcloudRustImage(imageId));

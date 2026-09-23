@@ -14,7 +14,12 @@ import type {
     SettingOption,
     SettingValue,
 } from '../../settings/types.js';
-import { LAUNCH_TOKEN_MESSAGE, LAUNCH_TOKEN_PATTERN } from '../../settings/values.js';
+import {
+    LAUNCH_PHRASE_MESSAGE,
+    LAUNCH_PHRASE_PATTERN,
+    LAUNCH_TOKEN_MESSAGE,
+    LAUNCH_TOKEN_PATTERN,
+} from '../../settings/values.js';
 import { assertOvhcloudCounterStrike2Server } from '../counterStrike2.js';
 
 const START_PARAMS_ENV = 'CS2_START_PARAMS';
@@ -67,6 +72,11 @@ const token = {
     patternMessage: LAUNCH_TOKEN_MESSAGE,
 } as const;
 
+const phrase = {
+    pattern: LAUNCH_PHRASE_PATTERN,
+    patternMessage: LAUNCH_PHRASE_MESSAGE,
+} as const;
+
 const COUNTER_STRIKE_2_LAUNCH_DEFINITIONS: SettingDefinition[] = [
     {
         key: 'hostname',
@@ -75,7 +85,7 @@ const COUNTER_STRIKE_2_LAUNCH_DEFINITIONS: SettingDefinition[] = [
         label: 'Server name',
         description: 'Name shown in the in-game server browser.',
         default: '',
-        ...token,
+        ...phrase,
     },
     {
         key: 'maxplayers',

@@ -6,7 +6,7 @@ import {
   type ServerHistoryEntry,
   type ServerMetricHistoryPoint,
 } from '../../utils/serverRuntime';
-import type { GameServer, InstallInteraction, InstallStep } from '../../types/gameServer';
+import type { GameServer, InstallInteraction, InstallStep, ServerPlayers } from '../../types/gameServer';
 import { nextId } from '../../utils/uid';
 
 // Latest fleet sample per server id, kept so a tick that lands before the server list can
@@ -25,6 +25,7 @@ interface CreateWebSocketMessageHandlerDeps {
   setServerMetricsHistoryById: React.Dispatch<
     React.SetStateAction<Record<string, ServerMetricHistoryPoint[]>>
   >;
+  setServersPlayersById: React.Dispatch<React.SetStateAction<Record<string, ServerPlayers>>>;
   addServerHistoryEntries: (serverId: string, incoming: ServerHistoryEntry[]) => void;
   suppressReplayAfterClearRef: React.MutableRefObject<Record<string, boolean>>;
   replaceServerLogs: (serverId: string, nextLogs: LogEntry[]) => void;
@@ -53,6 +54,7 @@ export function createWebSocketMessageHandler({
   setGameServers,
   fleetMetricsRef,
   setServerMetricsHistoryById,
+  setServersPlayersById,
   addServerHistoryEntries,
   suppressReplayAfterClearRef,
   replaceServerLogs,
@@ -405,6 +407,29 @@ export function createWebSocketMessageHandler({
             return changed ? next : prev;
           });
         });
+        break;
+      }
+
+      case 'servers-players:subscribed':
+        break;
+
+      case 'servers-players:update': {
+        // The array is the whole fleet state: replace wholesale. A server absent from it has
+        // nothing to report, so it must clear rather than keep a stale count. Every field is
+        // independently nullable — a missing field means "not available", never zero.
+        const entries = Array.isArray(message.players) ? message.players : [];
+        const next: Record<string, ServerPlayers> = {};
+
+        for (const entry of entries) {
+          const entryServerId = normalizeServerId(entry);
+          if (!entryServerId) continue;
+          const online = typeof entry?.online === 'number' && Number.isFinite(entry.online) ? entry.online : null;
+          const max = typeof entry?.max === 'number' && Number.isFinite(entry.max) ? entry.max : null;
+          const names = Array.isArray(entry?.names) ? entry.names.map((name: unknown) => String(name)) : null;
+          next[entryServerId] = { online, max, names };
+        }
+
+        startTransition(() => setServersPlayersById(next));
         break;
       }
 

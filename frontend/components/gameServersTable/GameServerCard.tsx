@@ -11,7 +11,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import type { GameServer } from '../../types/gameServer';
+import type { GameServer, ServerPlayers } from '../../types/gameServer';
 import type { AuthUser } from '../../utils/permissions';
 import { PUBLIC_CONNECTION_HOST } from '../../utils/api';
 import {
@@ -21,7 +21,7 @@ import {
   isServerCreatingStatus,
   isServerInstallingStatus,
 } from '../../utils/serverRuntime';
-import { canOpenServerSettings, formatNetworkSpeed, hasServerPermission, type MetricType } from './utils';
+import { canOpenServerSettings, formatNetworkSpeed, formatPlayerCount, hasServerPermission, playersHaveNames, type MetricType } from './utils';
 import { getServerStatusPresentation } from './utils';
 import { ODS_CHART_THEME } from '../charts/theme';
 import { AppButton } from '../../src/ui/components';
@@ -31,6 +31,9 @@ export type ConfirmServerAction = 'start' | 'stop' | 'restart' | 'delete';
 export interface GameServerCardActions {
   currentUser?: AuthUser | null;
   permissionsByServer?: Record<string, string[]>;
+  players?: Record<string, ServerPlayers>;
+  showPlayers?: boolean;
+  onOpenPlayers?: (serverId: string) => void;
   rowBorder: string;
   textPrimary: string;
   textSecondary: string;
@@ -78,6 +81,9 @@ export function GameServerCard({
   server,
   currentUser,
   permissionsByServer,
+  players,
+  showPlayers = false,
+  onOpenPlayers,
   editingId,
   editValue,
   setEditValue,
@@ -238,6 +244,23 @@ export function GameServerCard({
           </AppButton>
         )}
       </div>
+
+      {showPlayers && (
+        <div className="mb-3 flex items-center gap-2">
+          <span className={`text-xs ${TEXT_TERTIARY}`}>Players</span>
+          {playersHaveNames(players?.[server.id]) ? (
+            <button
+              type="button"
+              onClick={() => onOpenPlayers?.(server.id)}
+              className={`cursor-pointer text-sm ${TEXT_PRIMARY} transition-colors hover:text-[var(--color-cyan-400)]`}
+            >
+              {formatPlayerCount(players?.[server.id])}
+            </button>
+          ) : (
+            <span className={`text-sm ${TEXT_SECONDARY}`}>{formatPlayerCount(players?.[server.id])}</span>
+          )}
+        </div>
+      )}
 
       {(isGrid || isUpLike) && (isGrid ? (
         <div className="mb-3 space-y-2">

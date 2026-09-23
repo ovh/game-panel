@@ -7,10 +7,13 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
-        mavenCentral()
         maven {
             name = "hytale"
             url = uri("https://maven.hytale.com/release")
+            content { includeGroup("com.hypixel.hytale") }
+        }
+        mavenCentral {
+            content { excludeGroup("com.hypixel.hytale") }
         }
     }
 }

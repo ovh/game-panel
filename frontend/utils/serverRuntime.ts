@@ -76,14 +76,6 @@ export function mapBackendStatusToUi(status: unknown): GameServerStatus {
   return 'stopped';
 }
 
-export function isServerRunningStatus(status: unknown): boolean {
-  return mapBackendStatusToUi(status) === 'running';
-}
-
-export function isServerStoppedStatus(status: unknown): boolean {
-  return mapBackendStatusToUi(status) === 'stopped';
-}
-
 export function isServerCreatingStatus(status: unknown): boolean {
   return mapBackendStatusToUi(status) === 'creating';
 }

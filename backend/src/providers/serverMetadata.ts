@@ -14,6 +14,11 @@ export type OvhcloudCounterStrike2Metadata = OvhcloudProviderMetadata & {
     serverType: 'counter-strike-2';
 };
 
+export type OvhcloudGarrysModMetadata = OvhcloudProviderMetadata & {
+    family: 'garrys-mod';
+    serverType: 'garrys-mod';
+};
+
 export type OvhcloudHytaleMetadata = OvhcloudProviderMetadata & {
     family: 'hytale';
     serverType: 'hytale';
@@ -122,6 +127,16 @@ export function getOvhcloudCounterStrike2Metadata(server: GameServerRow): Ovhclo
     }
 
     return metadata as OvhcloudCounterStrike2Metadata;
+}
+
+export function getOvhcloudGarrysModMetadata(server: GameServerRow): OvhcloudGarrysModMetadata {
+    const metadata = getOvhcloudMetadata(server);
+
+    if (metadata.family !== 'garrys-mod' || metadata.serverType !== 'garrys-mod') {
+        throw Object.assign(new Error("Feature is only available for OVHcloud Garry's Mod servers"), { statusCode: 501 });
+    }
+
+    return metadata as OvhcloudGarrysModMetadata;
 }
 
 export function getOvhcloudHytaleMetadata(server: GameServerRow): OvhcloudHytaleMetadata {

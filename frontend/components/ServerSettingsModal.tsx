@@ -82,6 +82,7 @@ export function ServerSettingsModal({
   const isProjectZomboidOvhcloud = ovhcloudFamily === 'project-zomboid';
   const isRustOvhcloud = ovhcloudFamily === 'rust';
   const isValheimOvhcloud = ovhcloudFamily === 'valheim';
+  const isGarrysModOvhcloud = ovhcloudFamily === 'garrys-mod';
   const isCS2Ovhcloud = (() => {
     if (serverProvider !== 'ovhcloud') return false;
     try {
@@ -351,6 +352,7 @@ export function ServerSettingsModal({
       isPalworldOvhcloud ||
       isProjectZomboidOvhcloud ||
       isCS2Ovhcloud ||
+      isGarrysModOvhcloud ||
       isRustOvhcloud ||
       isValheimOvhcloud ||
       isLinuxGSMGame);
@@ -361,6 +363,7 @@ export function ServerSettingsModal({
     (isPalworldOvhcloud && canUsePalworld) ||
     (isProjectZomboidOvhcloud && canUseProjectZomboid) ||
     (isCS2Ovhcloud && (canEditContainerConfig || canWipeHard)) ||
+    (isGarrysModOvhcloud && (canEditContainerConfig || canWipeHard)) ||
     (isRustOvhcloud && canUseRust) ||
     (isValheimOvhcloud && canUseValheim) ||
     (isLinuxGSMGame && canUseFileManager);
@@ -974,6 +977,18 @@ export function ServerSettingsModal({
               textSecondary,
               inputBg,
               inputBorder,
+            } : null}
+            garrysModProps={isGarrysModOvhcloud && serverId && (canEditContainerConfig || canWipeHard) ? {
+              serverId,
+              serverStatus,
+              canEdit: canEditContainerConfig,
+              canWipeHard,
+              onReinstallStarted: onClose,
+              canManageEnv,
+              borderColor,
+              contentBg,
+              textPrimary,
+              textSecondary,
             } : null}
             rustProps={isRustOvhcloud && serverId && canUseRust ? {
               serverId,

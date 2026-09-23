@@ -14,6 +14,7 @@ import {
   handleSubscribeActions,
   handleSubscribeServers,
   handleSubscribeServersMetrics,
+  handleSubscribeServersPlayers,
   handleSubscribeSystemMetrics,
   handleUnsubscribe,
   handleSubscribeFileTransfers,
@@ -21,6 +22,7 @@ import {
 import { userRepository, serverMemberRepository } from '../database/index.js';
 import { startSystemMetricsPoller } from './pollers/systemMetricsPoller.js';
 import { startServerMetricsPoller } from './pollers/serverMetricsPoller.js';
+import { startServerPlayersPoller } from './pollers/serverPlayersPoller.js';
 import { logError } from '../utils/logger.js';
 import { PERMISSIONS } from '../permissions.js';
 
@@ -80,6 +82,7 @@ export function setupWebSocket(wss: WebSocketServer): void {
   // Start global pollers once at boot
   const systemMetricsTimer = startSystemMetricsPoller(wss, { intervalMs: 10_000 });
   const serverMetricsTimer = startServerMetricsPoller(wss, { intervalMs: 10_000 });
+  const serverPlayersTimer = startServerPlayersPoller(wss, { intervalMs: 10_000 });
 
   const heartbeatInterval = setInterval(() => {
     for (const client of wss.clients) {
@@ -143,6 +146,7 @@ export function setupWebSocket(wss: WebSocketServer): void {
     clearInterval(heartbeatInterval);
     clearInterval(systemMetricsTimer);
     clearInterval(serverMetricsTimer);
+    clearInterval(serverPlayersTimer);
 
     try {
       broadcaster.shutdown();
@@ -236,6 +240,10 @@ async function routeMessage(
 
     case 'subscribe:servers-metrics':
       await handleSubscribeServersMetrics(ws);
+      return;
+
+    case 'subscribe:servers-players':
+      await handleSubscribeServersPlayers(ws);
       return;
 
     case 'subscribe:system-metrics':

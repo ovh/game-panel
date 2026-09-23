@@ -46,6 +46,81 @@ is_true() {
   esac
 }
 
+escape_env_value() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\$/\$\$}"
+  value="${value//\"/\\\"}"
+  printf '"%s"' "$value"
+}
+
+env_file_read_value() {
+  local env_file="$1"
+  local key="$2"
+  local raw=""
+
+  [[ -f "$env_file" ]] || return 0
+
+  raw="$(sed -n "s/^${key}=//p" "$env_file" | tail -n 1)"
+  raw="${raw%\"}"
+  raw="${raw#\"}"
+
+  printf '%s' "$raw"
+}
+
+env_file_append_if_missing() {
+  local env_file="$1"
+  local key="$2"
+  local value="$3"
+
+  [[ -f "$env_file" ]] || die "Missing env file: $env_file"
+
+  if grep -q "^${key}=" "$env_file"; then
+    return
+  fi
+
+  printf '%s=%s\n' "$key" "$(escape_env_value "$value")" >>"$env_file"
+}
+
+generate_secret() {
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -hex 48
+    return
+  fi
+
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - <<'PY'
+import secrets
+print(secrets.token_hex(48))
+PY
+    return
+  fi
+
+  tr -dc 'A-Fa-f0-9' </dev/urandom | head -c 96
+}
+
+generate_uuid() {
+  if command -v uuidgen >/dev/null 2>&1; then
+    uuidgen | tr '[:upper:]' '[:lower:]'
+    return
+  fi
+
+  if [[ -r /proc/sys/kernel/random/uuid ]]; then
+    cat /proc/sys/kernel/random/uuid
+    return
+  fi
+
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - <<'PY'
+import uuid
+print(str(uuid.uuid4()))
+PY
+    return
+  fi
+
+  die "Unable to generate a UUID (missing uuidgen, /proc/sys/kernel/random/uuid, and python3)."
+}
+
 ensure_linux() {
   [[ "$(uname -s)" == "Linux" ]] || die "This script supports Linux only."
 }
@@ -116,6 +191,7 @@ install_base_packages() {
   require_supported_platform
   apt_install \
     acl \
+    bind9-dnsutils \
     ca-certificates \
     curl \
     git \
@@ -237,60 +313,4 @@ ensure_docker_stack() {
   fi
 
   install_docker_stack
-}
-
-ensure_compose_traefik_image() {
-  local compose_file="$1"
-  local desired_image current_image tmp_file
-
-  [[ -f "$compose_file" ]] || die "Missing compose file: $compose_file"
-
-  desired_image="$(resolve_traefik_image)"
-  current_image="$(awk '
-    /^[[:space:]]*traefik:[[:space:]]*$/ { in_traefik=1; next }
-    in_traefik && /^[[:space:]]*image:[[:space:]]*/ {
-      sub(/^[[:space:]]*image:[[:space:]]*/, "", $0)
-      print
-      exit
-    }
-    in_traefik && /^[[:space:]]*[A-Za-z0-9_-]+:[[:space:]]*$/ && $0 !~ /^[[:space:]]*image:/ {
-      next
-    }
-    in_traefik && /^[^[:space:]]/ {
-      in_traefik=0
-    }
-  ' "$compose_file")"
-
-  if [[ -z "$current_image" ]]; then
-    warn "Could not detect Traefik image in $compose_file; skipping Traefik image migration."
-    return
-  fi
-
-  if [[ "$current_image" == "$desired_image" ]]; then
-    return
-  fi
-
-  tmp_file="$(mktemp)"
-  awk -v desired_image="$desired_image" '
-    /^[[:space:]]*traefik:[[:space:]]*$/ {
-      in_traefik=1
-      print
-      next
-    }
-    in_traefik && /^[[:space:]]*image:[[:space:]]*/ {
-      sub(/image:[[:space:]].*/, "image: " desired_image)
-      print
-      in_traefik=0
-      next
-    }
-    in_traefik && /^[^[:space:]]/ {
-      in_traefik=0
-    }
-    { print }
-  ' "$compose_file" > "$tmp_file"
-
-  cat "$tmp_file" > "$compose_file"
-  rm -f "$tmp_file"
-
-  log "Updated Traefik image in $compose_file to ${desired_image}."
 }

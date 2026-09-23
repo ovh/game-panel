@@ -7,6 +7,7 @@ import type {
     SerializedServerAction,
 } from '../utils/apiSerialization.js';
 import type { MetricSample, MetricsHistoryMeta, SerializedMetricPoint } from '../utils/metrics.js';
+import type { ServerPlayersSample } from '../utils/playersCache.js';
 import type { ServerMetricsSample } from '../utils/serverMetricsCache.js';
 
 export type SubscriptionChannel =
@@ -16,6 +17,7 @@ export type SubscriptionChannel =
     | 'status'
     | 'servers'
     | 'servers-metrics'
+    | 'servers-players'
     | 'system-metrics'
     | 'file-transfers';
 
@@ -27,6 +29,7 @@ export interface SubscriptionsState {
     fileTransfers: Set<number>;
     servers: boolean;
     serversMetrics: boolean;
+    serversPlayers: boolean;
     systemMetrics: boolean;
 }
 
@@ -56,6 +59,7 @@ export type WsSubscribeInstallMessage = { type: 'subscribe:install'; serverId: n
 export type WsSubscribeLogsMessage = { type: 'subscribe:logs'; serverId: number; data?: WsLimitData };
 export type WsSubscribeActionsMessage = { type: 'subscribe:actions'; serverId: number; data?: WsLimitData };
 export type WsSubscribeServersMetricsMessage = { type: 'subscribe:servers-metrics' };
+export type WsSubscribeServersPlayersMessage = { type: 'subscribe:servers-players' };
 export type WsSubscribeSystemMetricsMessage = { type: 'subscribe:system-metrics'; data?: WsLimitData };
 export type WsSubscribeFileTransfersMessage = { type: 'subscribe:file-transfers'; serverId: number; data?: WsLimitData };
 export type WsTerminalAttachMessage = { type: 'terminal:attach'; sessionId: string; serverId?: number };
@@ -72,6 +76,7 @@ export type WSMessage =
     | WsSubscribeLogsMessage
     | WsSubscribeActionsMessage
     | WsSubscribeServersMetricsMessage
+    | WsSubscribeServersPlayersMessage
     | WsSubscribeSystemMetricsMessage
     | WsSubscribeFileTransfersMessage
     | WsTerminalMessage
@@ -105,6 +110,8 @@ export type OutgoingWebSocketMessage =
     | ({ type: 'file-transfer:progress'; serverId: number; job: SerializedFileTransferJob } & Timestamped)
     | ({ type: 'servers-metrics:subscribed' } & Timestamped)
     | ({ type: 'servers-metrics:update'; metrics: readonly ServerMetricsSample[] } & Timestamped)
+    | ({ type: 'servers-players:subscribed' } & Timestamped)
+    | ({ type: 'servers-players:update'; players: readonly ServerPlayersSample[] } & Timestamped)
     | ({ type: 'system-metrics:history'; metrics: SerializedMetricPoint[]; limit: number; meta?: MetricsHistoryMeta } & Timestamped)
     | ({ type: 'system-metrics:subscribed' } & Timestamped)
     | ({ type: 'system-metrics:update'; metrics: MetricSample } & Timestamped)

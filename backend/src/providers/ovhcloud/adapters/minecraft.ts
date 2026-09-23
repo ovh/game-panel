@@ -16,6 +16,7 @@ import { resolveMinecraftSoftWipeTargets } from '../images/minecraft/wipe.js';
 import minecraftRoutes from '../images/minecraft/routes.js';
 import { PERMISSIONS } from '../../../permissions.js';
 import { OVHCLOUD_DOCKER_STOP_TIMEOUT_SECONDS } from './common.js';
+import { minecraftPlayersSupport } from '../images/minecraft/onlinePlayers.js';
 import type { OvhcloudImageAdapter, OvhcloudInstallResolution } from './types.js';
 
 export const minecraftAdapter: OvhcloudImageAdapter = {
@@ -47,6 +48,8 @@ export const minecraftAdapter: OvhcloudImageAdapter = {
     routes: [
         { path: '/minecraft', router: minecraftRoutes },
     ],
+
+    players: minecraftPlayersSupport,
 
     supportsImageId(imageId: string): boolean {
         return Boolean(getOvhcloudMinecraftImage(imageId));

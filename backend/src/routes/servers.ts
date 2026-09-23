@@ -11,6 +11,7 @@ import { createServerDeleteRoutes } from './servers/delete.js';
 import { createServerInstallRoutes } from './servers/install.js';
 import { createServerInteractionRoutes } from './servers/interactions.js';
 import { createServerMetricsRoutes } from './servers/metrics.js';
+import { createServerPlayersRoutes } from './servers/players.js';
 import { createServerPatchRoutes } from './servers/patch.js';
 import { createServerPowerRoutes } from './servers/power.js';
 import { createServerReadRoutes } from './servers/read.js';
@@ -34,6 +35,8 @@ router.use('/:id/scheduled-tasks', scheduledTasksRoutes);
 
 // GET /api/servers/metrics and /api/servers/:id/metrics
 router.use('/', createServerMetricsRoutes());
+// GET /api/servers/players
+router.use('/', createServerPlayersRoutes());
 
 // /api/servers
 router.use('/', createServerReadRoutes());

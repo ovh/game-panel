@@ -1,12 +1,28 @@
 import type { AuthUser } from '../../utils/permissions';
+import type { ServerPlayers } from '../../types/gameServer';
 import {
   formatServerStatusLabel,
-  isServerUpLike,
   mapBackendStatusToUi,
   type ServerHistoryEntry,
 } from '../../utils/serverRuntime';
 
 export type SortField = 'name' | 'game' | 'status' | null;
+
+// "3 / 24" when both are known, "3" with no maximum, "–" when there is no count or the server
+// has nothing to report. A missing field is never rendered as zero.
+export function formatPlayerCount(players?: ServerPlayers | null): string {
+  if (!players || players.online === null || players.online === undefined) return '–';
+  return players.max !== null && players.max !== undefined
+    ? `${players.online} / ${players.max}`
+    : `${players.online}`;
+}
+
+// The cell is interactive only when there are names to show – the absence of names is the
+// normal case for most games, not a failure.
+export function playersHaveNames(players?: ServerPlayers | null): boolean {
+  return Boolean(players?.names && players.names.length > 0);
+}
+
 export type SortOrder = 'asc' | 'desc';
 export type MetricType = 'cpu' | 'memory' | 'disk' | 'network';
 
@@ -61,12 +77,6 @@ export function canOpenServerSettings(
   _serverId: string
 ) {
   return true;
-}
-
-export function formatMetricValue(status: string, metric?: number) {
-  if (!isServerUpLike(status)) return '-';
-  if (metric === undefined || metric === null) return 'Loading';
-  return `${metric.toFixed(2)}%`;
 }
 
 export function getServerStatusPresentation(status: string) {

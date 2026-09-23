@@ -14,6 +14,14 @@ export interface InstallInteraction {
   timestamp: string;
 }
 
+// Online players for one server, pushed by the `servers-players` channel. Every field is
+// independently nullable — a missing field means "not available", never zero.
+export interface ServerPlayers {
+  online: number | null;
+  max: number | null;
+  names: string[] | null;
+}
+
 export type GameServerStatus =
   | 'running'
   | 'stopped'

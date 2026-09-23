@@ -17,6 +17,7 @@ export class RealtimeGateway {
   private status: RealtimeConnectionStatus = 'closed';
   private statusListeners = new Set<ConnectionStatusListener>();
   private pendingServersMetricsSubscription = false;
+  private pendingServersPlayersSubscription = false;
   private pendingLogsSubscriptions = new Set<number>();
   private logsHistoryLimitByServer = new Map<number, number>();
   private pendingActionsSubscriptions = new Set<number>();
@@ -31,6 +32,7 @@ export class RealtimeGateway {
 
   resetState() {
     this.pendingServersMetricsSubscription = false;
+    this.pendingServersPlayersSubscription = false;
     this.pendingLogsSubscriptions.clear();
     this.logsHistoryLimitByServer.clear();
     this.pendingActionsSubscriptions.clear();
@@ -79,6 +81,10 @@ export class RealtimeGateway {
 
     if (this.pendingServersMetricsSubscription) {
       this.ws.send(JSON.stringify({ type: 'subscribe:servers-metrics' }));
+    }
+
+    if (this.pendingServersPlayersSubscription) {
+      this.ws.send(JSON.stringify({ type: 'subscribe:servers-players' }));
     }
 
     if (this.pendingLogsSubscriptions.size > 0) {
@@ -357,6 +363,25 @@ export class RealtimeGateway {
         JSON.stringify({
           type: 'unsubscribe',
           channel: 'servers-metrics',
+        })
+      );
+    }
+  }
+
+  subscribeServersPlayers() {
+    this.pendingServersPlayersSubscription = true;
+    if (this.ws && this.ws.readyState === WebSocket.OPEN && this.wsAuthed) {
+      this.ws.send(JSON.stringify({ type: 'subscribe:servers-players' }));
+    }
+  }
+
+  unsubscribeServersPlayers() {
+    this.pendingServersPlayersSubscription = false;
+    if (this.ws && this.ws.readyState === WebSocket.OPEN && this.wsAuthed) {
+      this.ws.send(
+        JSON.stringify({
+          type: 'unsubscribe',
+          channel: 'servers-players',
         })
       );
     }

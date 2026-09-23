@@ -21,7 +21,8 @@ import {
 import { serializeFileTransferJob } from '../database/repositories/fileTransferJobRepository.js';
 import * as dockerUtils from '../utils/docker.js';
 import { logError } from '../utils/logger.js';
-import { buildServerEnvVisibility } from '../middleware/auth.js';
+import { buildServerEnvVisibility, buildServerPermissionVisibility } from '../middleware/auth.js';
+import { PERMISSIONS } from '../permissions.js';
 import { nowIso } from '../utils/time.js';
 import type { InstallationProgressRow, ServerActionRow } from '../types/database.js';
 import type { GameServerRow } from '../types/gameServer.js';
@@ -35,6 +36,8 @@ import {
 } from '../utils/apiSerialization.js';
 import { buildMetricsHistory, METRICS_HISTORY_RAW_LIMIT } from '../utils/metrics.js';
 import { parseLimit } from '../utils/number.js';
+import { getPlayersSamples, hasPlayersSamples } from '../utils/playersCache.js';
+import { refreshPlayersCache } from '../services/players/fleet.js';
 import { getServerMetricsSamples } from '../utils/serverMetricsCache.js';
 
 export function ensureSubs(ws: AuthenticatedWebSocket): SubscriptionsState {
@@ -46,6 +49,7 @@ export function ensureSubs(ws: AuthenticatedWebSocket): SubscriptionsState {
         fileTransfers: new Set<number>(),
         servers: false,
         serversMetrics: false,
+        serversPlayers: false,
         systemMetrics: false,
     };
 
@@ -75,6 +79,7 @@ export function cleanupClient(ws: AuthenticatedWebSocket): void {
     if (ws.subs) {
         ws.subs.servers = false;
         ws.subs.serversMetrics = false;
+        ws.subs.serversPlayers = false;
         ws.subs.systemMetrics = false;
     }
 }
@@ -357,6 +362,12 @@ export async function handleUnsubscribe(
         return;
     }
 
+    if (channel === 'servers-players') {
+        subs.serversPlayers = false;
+        sendSafe(ws, { type: 'unsubscribed', channel: 'servers-players' });
+        return;
+    }
+
     if (!serverId) {
         sendSafe(ws, { type: 'error', error: 'Missing serverId' });
         return;
@@ -393,6 +404,29 @@ export async function handleSubscribeServersMetrics(ws: AuthenticatedWebSocket):
     sendSafe(ws, {
         type: 'servers-metrics:update',
         metrics: getServerMetricsSamples(),
+        timestamp: nowIso(),
+    });
+}
+
+export async function handleSubscribeServersPlayers(ws: AuthenticatedWebSocket): Promise<void> {
+    const subs = ensureSubs(ws);
+    subs.serversPlayers = true;
+
+    sendSafe(ws, { type: 'servers-players:subscribed', timestamp: nowIso() });
+
+    if (!hasPlayersSamples()) {
+        try {
+            await refreshPlayersCache();
+        } catch (error) {
+            logError('WS:SUB:SERVERS_PLAYERS', error);
+        }
+    }
+
+    const canSeePlayers = await buildServerPermissionVisibility(ws, PERMISSIONS.server.playersRead);
+
+    sendSafe(ws, {
+        type: 'servers-players:update',
+        players: getPlayersSamples().filter((sample) => canSeePlayers(sample.serverId)),
         timestamp: nowIso(),
     });
 }

@@ -37,13 +37,15 @@ update_canonical_path() {
   fi
 }
 
-escape_env_value() {
-  local value="$1"
-  value="${value//\\/\\\\}"
-  value="${value//\$/\$\$}"
-  value="${value//\"/\\\"}"
-  printf '"%s"' "$value"
-}
+if ! declare -F escape_env_value >/dev/null 2>&1; then
+  escape_env_value() {
+    local value="$1"
+    value="${value//\\/\\\\}"
+    value="${value//\$/\$\$}"
+    value="${value//\"/\\\"}"
+    printf '"%s"' "$value"
+  }
+fi
 
 read_env_raw_value() {
   local key="$1"
@@ -54,17 +56,6 @@ read_env_raw_value() {
   raw="${raw#\"}"
 
   printf '%s' "$raw"
-}
-
-append_env_if_missing() {
-  local key="$1"
-  local value="$2"
-
-  if grep -q "^${key}=" "$ENV_FILE"; then
-    return
-  fi
-
-  printf '%s=%s\n' "$key" "$(escape_env_value "$value")" >>"$ENV_FILE"
 }
 
 pull_updater_image_best_effort() {
@@ -293,7 +284,7 @@ run_deploy_migrations() {
   local applied_file="$DATA_DIR/deploy-migrations.applied"
   local migration id
 
-  [[ -d "$migrations_dir" ]] || return
+  [[ -d "$migrations_dir" ]] || return 0
   touch "$applied_file"
 
   for migration in "$migrations_dir"/*.sh; do

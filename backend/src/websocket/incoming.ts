@@ -9,6 +9,7 @@ const SUBSCRIPTION_CHANNELS = new Set<SubscriptionChannel>([
     'status',
     'servers',
     'servers-metrics',
+    'servers-players',
     'system-metrics',
     'file-transfers',
 ]);
@@ -143,6 +144,8 @@ export function parseIncomingWebSocketMessage(data: RawData): WSMessage {
         case 'subscribe:actions':
             return { type, serverId: serverIdFromMessage(message), data: optionalLimitData(message) };
         case 'subscribe:servers-metrics':
+            return { type };
+        case 'subscribe:servers-players':
             return { type };
         case 'subscribe:system-metrics':
             return { type, data: optionalLimitData(message) };

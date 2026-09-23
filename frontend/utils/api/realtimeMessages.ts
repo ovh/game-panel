@@ -9,6 +9,8 @@ export const REALTIME_MESSAGE_TYPES = [
   'system-metrics:history',
   'servers-metrics:subscribed',
   'servers-metrics:update',
+  'servers-players:subscribed',
+  'servers-players:update',
   'logs:history',
   'logs:container',
   'logs:new',
@@ -53,8 +55,4 @@ export function parseRealtimeMessage(data: unknown): RealtimeParseResult {
     knownType: KNOWN_TYPES.has(type),
     message: data as RealtimeMessage,
   };
-}
-
-export function isKnownRealtimeMessageType(type: string): type is RealtimeMessageType {
-  return KNOWN_TYPES.has(type);
 }

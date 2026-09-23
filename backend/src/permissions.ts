@@ -9,6 +9,7 @@ export const PERMISSIONS = {
         delete: 'server.delete',
         commandSend: 'server.command.send',
         env: 'server.env',
+        playersRead: 'server.players.read',
         wipe: {
             soft: 'server.wipe.soft',
             hard: 'server.wipe.hard',

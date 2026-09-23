@@ -1,4 +1,4 @@
-import type { GameServer, GameServerStatus } from '../types/gameServer';
+import type { GameServer, GameServerStatus, ServerPlayers } from '../types/gameServer';
 import { lazy, Suspense, useDeferredValue, useState, useMemo, useEffect, useRef } from 'react';
 import { ServerSettingsModal } from './ServerSettingsModal';
 import { ConfirmationModal } from './ConfirmationModal';
@@ -16,6 +16,7 @@ const GameServersTableDialogs = lazy(() =>
 );
 import { GameServersMobileList } from './gameServersTable/GameServersMobileList';
 import { GameServersDesktopTable } from './gameServersTable/GameServersDesktopTable';
+import { PlayersModal } from './gameServersTable/PlayersModal';
 import { GameServersGrid } from './gameServersTable/GameServersGrid';
 import { ViewModeToggle, type ServersViewMode } from './gameServersTable/ViewModeToggle';
 import type { GameServerCardActions } from './gameServersTable/GameServerCard';
@@ -30,6 +31,7 @@ import {
 interface GameServersTableProps {
   servers: GameServer[];
   metricsHistoryByServer?: Record<string, ServerMetricHistoryPoint[]>;
+  playersByServer?: Record<string, ServerPlayers>;
   onLoadMetricsHistory?: (serverId: string) => void;
   historyByServer?: Record<string, ServerHistoryEntry[]>;
   gameNamesByKey: Record<string, string>;
@@ -54,6 +56,7 @@ interface ConnectionPortRow {
 export function GameServersTable({
   servers,
   metricsHistoryByServer,
+  playersByServer,
   onLoadMetricsHistory,
   historyByServer,
   gameNamesByKey,
@@ -557,9 +560,22 @@ export function GameServersTable({
           : 'Network';
   const canOpenInstallModal = Boolean(onOpenInstallModal) && canInstall;
 
+  // The players payload can't tell "nothing to report" from "nothing you may see", so the
+  // column is hidden unless the user holds server.players.read somewhere (or is root).
+  const showPlayersColumn = Boolean(
+    currentUser?.isRoot ||
+      Object.values(permissionsByServer ?? {}).some(
+        (perms) => perms.includes('server.players.read') || perms.includes('*')
+      )
+  );
+  const [playersModalServerId, setPlayersModalServerId] = useState<string | null>(null);
+
   const cardActions: GameServerCardActions = {
     currentUser,
     permissionsByServer,
+    players: playersByServer,
+    showPlayers: showPlayersColumn,
+    onOpenPlayers: (serverId) => setPlayersModalServerId(serverId),
     rowBorder,
     textPrimary,
     textSecondary,
@@ -602,6 +618,9 @@ export function GameServersTable({
             filteredAndSortedServers={filteredAndSortedServers}
             currentUser={currentUser}
             permissionsByServer={permissionsByServer}
+            players={playersByServer}
+            showPlayers={showPlayersColumn}
+            onOpenPlayers={(serverId) => setPlayersModalServerId(serverId)}
             borderColor={borderColor}
             rowBorder={rowBorder}
             textPrimary={textPrimary}
@@ -690,6 +709,13 @@ export function GameServersTable({
       />
       </Suspense>
       )}
+
+      <PlayersModal
+        open={playersModalServerId !== null}
+        onClose={() => setPlayersModalServerId(null)}
+        serverName={servers.find((server) => server.id === playersModalServerId)?.name ?? ''}
+        players={playersModalServerId ? playersByServer?.[playersModalServerId] ?? null : null}
+      />
 
       <ServerSettingsModal
         isOpen={settingsModalOpen}
