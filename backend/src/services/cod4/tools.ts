@@ -1,4 +1,5 @@
 import dgram from 'node:dgram';
+import dns from 'node:dns/promises';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { GameServerRow } from '../../types/gameServer.js';
@@ -6,6 +7,7 @@ import { buildServerNetworkAlias } from '../../utils/docker.js';
 import { getServerStoragePaths } from '../../utils/storage.js';
 import { GAME_PORT_LABEL, resolveContainerPort } from '../players/resolve.js';
 import { parseStoredPorts } from '../../providers/runtimeConfig.js';
+import { getConfig } from '../../config.js';
 
 // Call of Duty 4 (CoD4X) over its own UDP protocol: getstatus (no password) and rcon (the password from the startup
 // line). The panel's backend reaches each game container on the games network by its alias.
@@ -17,6 +19,23 @@ export function cod4Target(server: GameServerRow): { host: string; port: number 
     const firstUdp = parseStoredPorts(server).udp[0]?.container;
     const fallback = typeof firstUdp === 'number' && firstUdp > 0 ? firstUdp : 28960;
     return { host: buildServerNetworkAlias(server.id), port: resolveContainerPort(server, 'udp', GAME_PORT_LABEL, fallback) };
+}
+
+// the address players connect to: the panel's public IPv4 (its domain) and the host UDP port of the game port.
+// Inside its container CoD4X only knows 0.0.0.0 and the container port (status shows udp/ip: 0.0.0.0:28960).
+let publicIp: { at: number; ip: string | null } | null = null;
+
+export async function cod4PublicAddress(server: GameServerRow): Promise<string> {
+    if (!publicIp || Date.now() - publicIp.at > 3600_000) {
+        const ip = await dns
+            .lookup(getConfig().domain, { family: 4 })
+            .then((r) => r.address)
+            .catch(() => null);
+        publicIp = { at: Date.now(), ip };
+    }
+    const container = cod4Target(server).port;
+    const hostPort = parseStoredPorts(server).udp.find((p) => p.container === container)?.host ?? container;
+    return `${publicIp.ip ?? getConfig().domain}:${hostPort}`;
 }
 
 // sends one packet and collects every answer for a moment (rcon answers come in several packets)

@@ -8,7 +8,7 @@ import { serverRepository } from '../database/index.js';
 import { docker } from '../utils/docker/client.js';
 import { getServerStoragePaths } from '../utils/storage.js';
 import type { GameServerRow } from '../types/gameServer.js';
-import { GAMETYPES, STOCK_MAPS, getStatus, parseRconStatus, rcon } from '../services/cod4/tools.js';
+import { GAMETYPES, STOCK_MAPS, cod4PublicAddress, getStatus, parseRconStatus, rcon } from '../services/cod4/tools.js';
 import { b3DatabaseSize, b3Query, backupB3Database, findB3Config, readB3Database, restoreB3Database } from '../services/cod4/b3db.js';
 import { readActivity } from '../middleware/activityLog.js';
 import { readAdminSettings, writeAdminSettings } from '../services/cod4/settings.js';
@@ -330,7 +330,13 @@ router.post('/servers/:id/rcon', async (req: AuthenticatedRequest, res: Response
         const command = String(req.body?.command ?? '').replace(/[\r\n]/g, ' ').trim().slice(0, 300);
         if (!command) throw badRequest('Empty command');
         res.locals.activityDetail = `rcon ${command.split(' ')[0]}`;
-        return res.json({ output: await rcon(server, command, 2000) });
+        let output = await rcon(server, command, 2000);
+        // status: the address players use instead of the container's 0.0.0.0
+        if (/^udp\/ip\s*:\s*0\.0\.0\.0:\d+/m.test(output)) {
+            const address = await cod4PublicAddress(server);
+            output = output.replace(/^(udp\/ip\s*:\s*)0\.0\.0\.0:\d+/m, `$1${address}`);
+        }
+        return res.json({ output });
     } catch (error) {
         return fail(res, error, 'RCON failed');
     }
