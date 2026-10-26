@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# OVHcloud Game Panel: Call of Duty 4 servers are installed from your own files, nothing is downloaded (like TCAdmin).
+# OVHcloud Game Panel: Call of Duty 4 servers are installed from your own files, nothing is downloaded.
 #  - Game files: the folder /opt/gamepanel/cod4-linux (CoD4X: cod4x18_dedrun, main, zone, mods, usermaps ...).
 #    A new server gets hard links to the big files (no extra disk space, ready in a second) and copies of the small
 #    ones (configs). The install form checks the folder first and refuses to start the install if files are missing.

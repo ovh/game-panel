@@ -102,7 +102,7 @@ bash ~/gp-cod4-linux.sh --from https://github.com/<you>/<repo>/releases/tag/<tag
 
 ### FastDL (`gp-fastdl.sh`)
 
-Players download mods and custom maps over HTTP, like on TCAdmin. Every CoD4 server has its own FastDL by server
+Players download mods and custom maps over HTTP. Every CoD4 server has its own FastDL by server
 number: server 5 → `/var/www/html/cod4/5` at `http://<panel domain>:8080/cod4/5`, so servers with different versions of
 the same mod never mix. The service `gamepanel-fastdl` copies the `.ff` and `.iwd` files from each server's `mods/` and
 `usermaps/` and keeps them in sync every 10 seconds: new or changed files appear by themselves, deleted ones disappear,

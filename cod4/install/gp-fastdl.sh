@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# OVHcloud Game Panel: FastDL for Call of Duty 4 (mods and custom maps download over HTTP, like on TCAdmin).
+# OVHcloud Game Panel: FastDL for Call of Duty 4 (mods and custom maps download over HTTP).
 #  - Every CoD4 server has its own FastDL, by server number: /var/www/html/cod4/<server>/(mods|usermaps)/...,
 #    served at http://<panel domain>:8080/cod4/<server> (server 5: http://ovh.cod4x.org:8080/cod4/5).
 #    The same files over HTTPS for browsers: https://<panel domain>/fastdl/<server>/... (the game uses the HTTP link).
