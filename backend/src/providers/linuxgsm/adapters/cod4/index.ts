@@ -6,6 +6,9 @@ import * as dockerUtils from '../../../../utils/docker.js';
 import { logInfo } from '../../../../utils/logger.js';
 import { applyLinuxGsmConfigPatches } from '../linuxGsmConfig.js';
 import { runGenericBeforeContainerCreate } from '../generic/index.js';
+import { readAdminSettings } from '../../../../services/cod4/settings.js';
+import { autoInstallB3 } from '../../../../services/cod4/b3install.js';
+import { getServerStoragePaths } from '../../../../utils/storage.js';
 import type {
     AfterContainerStartContext,
     BeforeContainerCreateContext,
@@ -225,13 +228,18 @@ export async function cod4FastDlUrl(serverId: number): Promise<string | null> {
 async function setCod4StartParameters(
     dataDir: string,
     gameServerName: string,
-    options: { rconPassword?: string; fastDlUrl?: string | null }
+    options: { rconPassword?: string; fastDlUrl?: string | null; mod?: string }
 ): Promise<void> {
     let parameters = await defaultStartParameters();
-    if (options.fastDlUrl) {
-        const fastdl = `+set sv_allowDownload 1 +set sv_wwwDownload 1 +set sv_wwwBaseURL ${options.fastDlUrl} +set sv_wwwDlDisconnected 0`;
+    const early = [
+        options.mod && `+set fs_game mods/${options.mod}`,
+        options.fastDlUrl && `+set sv_allowDownload 1 +set sv_wwwDownload 1 +set sv_wwwBaseURL ${options.fastDlUrl} +set sv_wwwDlDisconnected 0`,
+    ]
+        .filter(Boolean)
+        .join(' ');
+    if (early) {
         const at = parameters.search(/\+(?:exec|map|map_rotate|devmap)\b/);
-        parameters = at >= 0 ? `${parameters.slice(0, at)}${fastdl} ${parameters.slice(at)}` : `${parameters} ${fastdl}`;
+        parameters = at >= 0 ? `${parameters.slice(0, at)}${early} ${parameters.slice(at)}` : `${parameters} ${early}`;
     }
     if (options.rconPassword) parameters = `${parameters} +rcon_password ${options.rconPassword}`;
     await applyLinuxGsmConfigPatches({ dataDir, gameServerName }, [
@@ -278,13 +286,25 @@ export const cod4Adapter: GameAdapter = {
         // checked again here: the folder may have changed since the install was requested
         await assertCod4FilesReady();
         const count = await linkCod4Files(ctx.dataDir);
+        // Admin page > CoD4 files > Defaults for new servers
+        const { cod4Defaults } = await readAdminSettings();
+        if (cod4Defaults.serverCfg.trim()) {
+            const cfg = path.join(ctx.dataDir, 'serverfiles', 'main', `${path.basename(ctx.gameServerName)}.cfg`);
+            await fs.mkdir(path.dirname(cfg), { recursive: true });
+            await fs.rm(cfg, { force: true });
+            await fs.writeFile(cfg, cod4Defaults.serverCfg.endsWith('\n') ? cod4Defaults.serverCfg : `${cod4Defaults.serverCfg}\n`, 'utf8');
+        }
         await ensureServerConfig(ctx.dataDir, ctx.gameServerName);
         if (ctx.serverName) await setCod4Hostname(ctx.dataDir, ctx.gameServerName, ctx.serverName);
+        const mod = cod4Defaults.mod && (await fs.stat(path.join(ctx.dataDir, 'serverfiles', 'mods', cod4Defaults.mod)).catch(() => null))?.isDirectory()
+            ? cod4Defaults.mod
+            : '';
+        if (cod4Defaults.mod && !mod) logInfo('LINUXGSM:COD4', `Default mod ${cod4Defaults.mod} is not in the files, left out`, { serverId: ctx.serverId });
         // a new server gets its RCON password from the install form and its own FastDL link (when FastDL is installed)
         const rconPassword = ctx.installSecrets?.rconPassword;
-        const fastDlUrl = await cod4FastDlUrl(ctx.serverId);
-        if (rconPassword || fastDlUrl) {
-            await setCod4StartParameters(ctx.dataDir, ctx.gameServerName, { rconPassword, fastDlUrl });
+        const fastDlUrl = cod4Defaults.fastdl ? await cod4FastDlUrl(ctx.serverId) : null;
+        if (rconPassword || fastDlUrl || mod) {
+            await setCod4StartParameters(ctx.dataDir, ctx.gameServerName, { rconPassword, fastDlUrl, mod });
             if (fastDlUrl) logInfo('LINUXGSM:COD4', `FastDL: ${fastDlUrl}`, { serverId: ctx.serverId });
         }
         if (count) {
@@ -293,7 +313,13 @@ export const cod4Adapter: GameAdapter = {
             });
         }
     },
-    async afterContainerStart(_ctx: AfterContainerStartContext): Promise<void> {
-        return;
+    async afterContainerStart(ctx: AfterContainerStartContext): Promise<void> {
+        // B3 for new servers (Admin page): in the background, the install does not wait for it
+        const { cod4Defaults } = await readAdminSettings();
+        if (!cod4Defaults.b3) return;
+        const mod = cod4Defaults.mod && (await fs.stat(path.join(getServerStoragePaths(ctx.serverId).dataDir, 'serverfiles', 'mods', cod4Defaults.mod)).catch(() => null))?.isDirectory()
+            ? cod4Defaults.mod
+            : '';
+        void autoInstallB3(ctx.serverId, mod);
     },
 };

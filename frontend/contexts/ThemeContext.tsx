@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 
 type Theme = 'light' | 'dark';
 // animated Neon theme on top of the dark theme, in two colour sets
@@ -13,7 +13,11 @@ interface ThemeContextValue {
   toggleNeon: () => void;
   // the login page is always shown in the Neon theme (orange when Neon is off)
   setLoginScreen: (on: boolean) => void;
+  // the panel's default theme (Admin → Panel → Look), used until this browser picks one
+  applyDefaultTheme: (theme: DefaultTheme) => void;
 }
+
+export type DefaultTheme = 'orange' | 'cyan' | 'dark' | 'light';
 
 const ThemeContext = createContext<ThemeContextValue>({
   theme: 'light',
@@ -21,20 +25,37 @@ const ThemeContext = createContext<ThemeContextValue>({
   neon: 'off',
   toggleNeon: () => {},
   setLoginScreen: () => {},
+  applyDefaultTheme: () => {},
 });
 
 export function useTheme() {
   return useContext(ThemeContext);
 }
 
+// a theme picked in this browser (a theme button); until then the panel's default theme is used
+function getInitialPicked(): boolean {
+  if (localStorage.getItem('theme-picked') === '1') return true;
+  // before the default theme existed, the choice was saved without this flag; orange Neon was the default then
+  const neon = localStorage.getItem('theme-neon');
+  return neon === 'off' || neon === 'cyan' || neon === '1';
+}
+
+function fromDefault(value: string | null): { theme: Theme; neon: NeonColor } {
+  if (value === 'cyan') return { theme: 'dark', neon: 'cyan' };
+  if (value === 'dark') return { theme: 'dark', neon: 'off' };
+  if (value === 'light') return { theme: 'light', neon: 'off' };
+  return { theme: 'dark', neon: 'orange' };
+}
+
 function getInitialTheme(): Theme {
+  if (!getInitialPicked()) return fromDefault(localStorage.getItem('theme-default')).theme;
   const stored = localStorage.getItem('theme');
   if (stored === 'light' || stored === 'dark') return stored;
   return 'light';
 }
 
-// orange Neon until someone picks another theme (also on the login page)
 function getInitialNeon(): NeonColor {
+  if (!getInitialPicked()) return fromDefault(localStorage.getItem('theme-default')).neon;
   const stored = localStorage.getItem('theme-neon');
   if (stored === 'off') return 'off';
   return stored === '1' || stored === 'cyan' ? 'cyan' : 'orange';
@@ -46,6 +67,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
   const [neon, setNeon] = useState<NeonColor>(getInitialNeon);
   const [loginScreen, setLoginScreen] = useState(false);
+  const [picked, setPicked] = useState<boolean>(getInitialPicked);
   // what is shown: the login page uses orange Neon when Neon is off; the saved choice stays as it is
   const shownNeon: NeonColor = neon === 'off' && loginScreen ? 'orange' : neon;
   const effectiveTheme: Theme = shownNeon !== 'off' ? 'dark' : theme;
@@ -59,11 +81,30 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     }
     root.classList.toggle('gp-neon', shownNeon !== 'off');
     root.classList.toggle('gp-neon-orange', shownNeon === 'orange');
-    localStorage.setItem('theme', theme);
-    localStorage.setItem('theme-neon', neon);
-  }, [effectiveTheme, theme, neon, shownNeon]);
+    if (picked) {
+      localStorage.setItem('theme', theme);
+      localStorage.setItem('theme-neon', neon);
+    }
+  }, [effectiveTheme, theme, neon, shownNeon, picked]);
+
+  const pick = () => {
+    setPicked(true);
+    localStorage.setItem('theme-picked', '1');
+  };
+  const applyDefaultTheme = useCallback(
+    (value: DefaultTheme) => {
+      // remembered for the next visit, so the page does not start in another theme
+      localStorage.setItem('theme-default', value);
+      if (picked) return;
+      const next = fromDefault(value);
+      setTheme(next.theme);
+      setNeon(next.neon);
+    },
+    [picked]
+  );
 
   const toggleTheme = () => {
+    pick();
     // leaving dark (also from neon) goes to the light theme
     if (effectiveTheme === 'dark') {
       setNeon('off');
@@ -72,10 +113,13 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       setTheme('dark');
     }
   };
-  const toggleNeon = () => setNeon((prev) => NEXT_NEON[prev]);
+  const toggleNeon = () => {
+    pick();
+    setNeon((prev) => NEXT_NEON[prev]);
+  };
 
   return (
-    <ThemeContext.Provider value={{ theme: effectiveTheme, toggleTheme, neon, toggleNeon, setLoginScreen }}>
+    <ThemeContext.Provider value={{ theme: effectiveTheme, toggleTheme, neon, toggleNeon, setLoginScreen, applyDefaultTheme }}>
       {children}
     </ThemeContext.Provider>
   );

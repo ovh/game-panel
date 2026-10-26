@@ -103,3 +103,51 @@ export async function backupB3Database(serverId: number): Promise<{ file: string
     await fs.writeFile(path.join(dataDir, rel), result.stdout, 'utf8');
     return { file: rel, size: Buffer.byteLength(result.stdout) };
 }
+
+// restore: the .sql file (from b3-backups/) fed to the mariadb client inside the database container
+export async function restoreB3Database(serverId: number, rel: string): Promise<void> {
+    if (!/^b3-backups\/[A-Za-z0-9_.-]+\.sql$/.test(rel)) throw Object.assign(new Error('Invalid backup file'), { statusCode: 400 });
+    const db = await readB3Database(serverId);
+    const sql = await fs.readFile(path.join(getServerStoragePaths(serverId).dataDir, rel));
+    const container = docker.getContainer(DB_CONTAINER);
+    const exec = await container.exec({
+        Cmd: ['mariadb', '-h127.0.0.1', `-u${db.user}`, db.database],
+        Env: [`MYSQL_PWD=${db.password}`],
+        AttachStdin: true,
+        AttachStdout: true,
+        AttachStderr: true,
+    });
+    const stream = await exec.start({ hijack: true, stdin: true });
+    const err = new PassThrough();
+    const stderr: Buffer[] = [];
+    err.on('data', (chunk: Buffer) => stderr.push(chunk));
+    docker.modem.demuxStream(stream, new PassThrough(), err);
+    await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('The restore took too long.')), 10 * 60_000);
+        stream.on('end', () => {
+            clearTimeout(timer);
+            resolve();
+        });
+        stream.on('error', (error: Error) => {
+            clearTimeout(timer);
+            reject(error);
+        });
+        stream.write(sql);
+        // close stdin so the client finishes; the stream ends when the client exits
+        (stream as unknown as { end: () => void }).end();
+    });
+    const info = await exec.inspect();
+    if ((info.ExitCode ?? 0) !== 0) {
+        throw Object.assign(new Error(`Restore failed: ${Buffer.concat(stderr).toString('utf8').trim()}`), { statusCode: 502 });
+    }
+}
+
+// the size of the server's B3 database
+export async function b3DatabaseSize(serverId: number): Promise<number | null> {
+    const rows = await b3Query(
+        serverId,
+        'SELECT COALESCE(SUM(data_length + index_length), 0) AS size FROM information_schema.tables WHERE table_schema = DATABASE()'
+    );
+    const size = Number(rows[0]?.size);
+    return Number.isFinite(size) ? size : null;
+}

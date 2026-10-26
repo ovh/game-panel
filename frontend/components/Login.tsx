@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Eye, EyeOff, Lock, User, AlertCircle } from 'lucide-react';
 import { apiClient } from '../utils/api';
-import { PanelLogo } from '../contexts/BrandingContext';
+import { PanelLogo, usePanelName } from '../contexts/BrandingContext';
 import { useTheme } from '../contexts/ThemeContext';
 
 interface LoginProps {
@@ -11,6 +11,7 @@ interface LoginProps {
 export function Login({ onLogin }: LoginProps) {
   // always in the Neon theme (orange when Neon is off), back to the saved theme after signing in
   const { setLoginScreen } = useTheme();
+  const { loginFooter } = usePanelName();
   useEffect(() => {
     setLoginScreen(true);
     return () => setLoginScreen(false);
@@ -203,9 +204,11 @@ export function Login({ onLogin }: LoginProps) {
           </div>
         </div>
 
-        <p className="mt-6 text-center text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>
-          © 2026 OVHcloud. All rights reserved.
-        </p>
+        {loginFooter && (
+          <p className="mt-6 text-center text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>
+            {loginFooter}
+          </p>
+        )}
       </div>
     </div>
   );

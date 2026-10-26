@@ -9,6 +9,7 @@ import {
   HardDrive,
   MemoryStick,
   Newspaper,
+  Palette,
   Play,
   RefreshCw,
   RotateCw,
@@ -24,21 +25,24 @@ import { AppButton, AppCard } from '../../src/ui/components';
 import { ConfirmationModal } from '../ConfirmationModal';
 import { NewsEditor } from '../NewsPanel';
 import { usePanelName } from '../../contexts/BrandingContext';
-import type { OverviewServer } from '../../utils/adminApi';
+import type { OverviewServer, PanelTheme } from '../../utils/adminApi';
 import { AdminLive } from './AdminLive';
 import { AdminMaps } from './AdminMaps';
 import { AdminContent } from './AdminContent';
 import { AdminB3 } from './AdminB3';
 import { AdminActivity } from './AdminActivity';
+import { AdminServerCfg } from './AdminServerCfg';
+import { AdminBackups } from './AdminBackups';
+import { AdminCod4Files } from './AdminCod4Files';
 import { ServerPicker, type Cod4Choice } from './shared';
 
 // Admin page (Super Admins): every server at a glance with group actions, what needs attention, FastDL, the host,
 // and the panel's own settings. Server status, metrics and players come from the panel's live data (props);
 // add-ons (B3, FastDL), host data and alerts from /api/admin/overview.
 
-type Tab = 'overview' | 'live' | 'maps' | 'content' | 'b3' | 'fastdl' | 'system' | 'activity' | 'panel';
+type Tab = 'overview' | 'live' | 'maps' | 'config' | 'content' | 'b3' | 'backups' | 'cod4files' | 'fastdl' | 'system' | 'activity' | 'panel';
 // tabs about one CoD4 server: they share the server choice
-const SERVER_TABS: Tab[] = ['live', 'maps', 'content', 'b3'];
+const SERVER_TABS: Tab[] = ['live', 'maps', 'config', 'content', 'b3'];
 type BulkAction = 'start' | 'stop' | 'restart';
 
 interface AdminPageProps {
@@ -53,8 +57,11 @@ const TABS: Array<{ id: Tab; label: string }> = [
   { id: 'overview', label: 'Overview' },
   { id: 'live', label: 'Players & RCON' },
   { id: 'maps', label: 'Maps' },
+  { id: 'config', label: 'Server config' },
   { id: 'content', label: 'Mods & maps' },
   { id: 'b3', label: 'B3' },
+  { id: 'backups', label: 'Backups' },
+  { id: 'cod4files', label: 'CoD4 files' },
   { id: 'fastdl', label: 'FastDL' },
   { id: 'system', label: 'System' },
   { id: 'activity', label: 'Activity' },
@@ -565,6 +572,9 @@ export function AdminPage({ gameServers, serversPlayersById, gameNamesByKey, han
       {tab === 'maps' && serverId && <AdminMaps serverId={serverId} />}
       {tab === 'content' && serverId && <AdminContent serverId={serverId} servers={cod4Servers} />}
       {tab === 'b3' && serverId && <AdminB3 serverId={serverId} b3State={addons.get(serverId)?.b3?.state ?? null} />}
+      {tab === 'config' && serverId && <AdminServerCfg serverId={serverId} />}
+      {tab === 'backups' && <AdminBackups servers={cod4Servers} serverId={serverId} onServer={setServerId} />}
+      {tab === 'cod4files' && <AdminCod4Files />}
       {tab === 'activity' && <AdminActivity />}
       {tab === 'panel' && <PanelSettings setActiveTab={setActiveTab} />}
 
@@ -582,7 +592,12 @@ export function AdminPage({ gameServers, serversPlayersById, gameNamesByKey, han
 }
 
 function PanelSettings({ setActiveTab }: { setActiveTab: (tab: string) => void }) {
-  const { name, saveName } = usePanelName();
+  const { name, saveName, defaultTheme, loginFooter, setAppearance } = usePanelName();
+  const [themeDraft, setThemeDraft] = useState<PanelTheme>(defaultTheme);
+  const [footerDraft, setFooterDraft] = useState(loginFooter);
+  const [lookResult, setLookResult] = useState<{ ok: boolean; text: string } | null>(null);
+  useEffect(() => setThemeDraft(defaultTheme), [defaultTheme]);
+  useEffect(() => setFooterDraft(loginFooter), [loginFooter]);
   const [draft, setDraft] = useState(name ?? '');
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
@@ -623,6 +638,57 @@ function PanelSettings({ setActiveTab }: { setActiveTab: (tab: string) => void }
           </AppButton>
         </div>
         {result && <p className={`mt-2 text-sm ${result.ok ? 'text-emerald-300' : 'text-red-300'}`}>{result.text}</p>}
+      </AppCard>
+
+      <AppCard className="p-5">
+        <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-gray-400">
+          <Palette className="h-4 w-4" /> Look
+        </h2>
+        <p className="mb-3 text-sm text-gray-400">The theme of visitors who have not picked one yet (login page too), and the line under the login form.</p>
+        <div className="mb-3 flex flex-wrap gap-2">
+          {(
+            [
+              ['orange', 'Neon orange'],
+              ['cyan', 'Neon cyan'],
+              ['dark', 'Dark'],
+              ['light', 'Light'],
+            ] as Array<[PanelTheme, string]>
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setThemeDraft(id)}
+              className={`rounded-lg border px-3 py-1.5 text-sm font-semibold transition-colors ${
+                themeDraft === id
+                  ? 'border-[var(--color-cyan-400)] bg-[var(--color-cyan-400)]/15 text-[var(--color-cyan-400)]'
+                  : 'border-gray-700 text-gray-300 hover:text-white'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <input
+          value={footerDraft}
+          onChange={(e) => setFooterDraft(e.target.value)}
+          maxLength={200}
+          placeholder="Login page footer (empty = none), e.g. © 2026 My Clan"
+          className={field}
+        />
+        <div className="mt-3">
+          <AppButton
+            tone="primary"
+            onClick={() => {
+              setLookResult(null);
+              setAppearance({ defaultTheme: themeDraft, loginFooter: footerDraft })
+                .then(() => setLookResult({ ok: true, text: 'Saved. Your own theme choice (sidebar buttons) stays as it is.' }))
+                .catch((e) => setLookResult({ ok: false, text: errorText(e, 'Could not save.') }));
+            }}
+          >
+            Save
+          </AppButton>
+        </div>
+        {lookResult && <p className={`mt-2 text-sm ${lookResult.ok ? 'text-emerald-300' : 'text-red-300'}`}>{lookResult.text}</p>}
       </AppCard>
 
       <AppCard className="p-5">

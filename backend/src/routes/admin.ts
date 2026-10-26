@@ -9,13 +9,21 @@ import { docker } from '../utils/docker/client.js';
 import { getServerStoragePaths } from '../utils/storage.js';
 import type { GameServerRow } from '../types/gameServer.js';
 import { GAMETYPES, STOCK_MAPS, getStatus, parseRconStatus, rcon } from '../services/cod4/tools.js';
-import { b3Query, backupB3Database, findB3Config } from '../services/cod4/b3db.js';
+import { b3DatabaseSize, b3Query, backupB3Database, findB3Config, readB3Database, restoreB3Database } from '../services/cod4/b3db.js';
 import { readActivity } from '../middleware/activityLog.js';
+import { readAdminSettings, writeAdminSettings } from '../services/cod4/settings.js';
+import { backupServerConfigs, deleteBackup, listBackups, runAutoBackup, startAutoBackupScheduler } from '../services/cod4/backups.js';
+import { checkCod4Files, cod4FilesDir, cod4FilesHostDir } from '../providers/linuxgsm/adapters/cod4/index.js';
+import { certificateInfo } from '../services/cod4/cert.js';
+import { writeBranding } from './branding.js';
 
 // Admin page (Super Admins): everything the panel can tell about the servers' add-ons (B3, FastDL), the host and what
 // needs attention, in one call. Server status, metrics and players come from the endpoints the panel already uses.
 const router = Router();
 router.use(authMiddleware, rootOnly);
+
+// daily backups (Admin → Backups); the backend loads this file at start
+startAutoBackupScheduler();
 
 type Alert = { level: 'error' | 'warning'; text: string; serverId?: number };
 
@@ -204,6 +212,15 @@ router.get('/overview', async (req: AuthenticatedRequest, res: Response) => {
             }
         }
 
+        // ---- the panel's HTTPS certificate
+        const cert = await certificateInfo();
+        if (cert?.daysLeft !== undefined && cert.daysLeft !== null) {
+            if (cert.daysLeft < 0) alerts.push({ level: 'error', text: `The HTTPS certificate of ${cert.host} has expired.` });
+            else if (cert.daysLeft < 14) {
+                alerts.push({ level: cert.daysLeft < 5 ? 'error' : 'warning', text: `The HTTPS certificate of ${cert.host} expires in ${cert.daysLeft} day(s).` });
+            }
+        }
+
         const sizes = req.query.sizes === '1' ? await folderSizes(rows.map((r) => r.id)) : null;
         return res.json({
             servers,
@@ -217,6 +234,7 @@ router.get('/overview', async (req: AuthenticatedRequest, res: Response) => {
                 disk,
                 containers,
                 sizes,
+                cert,
             },
             alerts,
         });
@@ -665,6 +683,391 @@ router.get('/servers/:id/b3/backups', async (req: AuthenticatedRequest, res: Res
         return res.json({ backups: files.sort((a, b) => b.time - a.time) });
     } catch (error) {
         return fail(res, error, 'Could not list the backups');
+    }
+});
+
+// restore: B3 stopped first (it keeps writing), the database replaced from the .sql file, B3 started again
+router.post('/servers/:id/b3/restore', async (req: AuthenticatedRequest, res: Response) => {
+    try {
+        const server = await cod4Server(req.params.id);
+        const file = String(req.body?.file ?? '');
+        const wasRunning = (await b3Info(getServerStoragePaths(server.id).dataDir))?.state === 'running';
+        if (wasRunning) {
+            await writeB3Control(server, 'stop');
+            await new Promise((resolve) => setTimeout(resolve, 4000));
+        }
+        try {
+            await restoreB3Database(server.id, file);
+        } finally {
+            if (wasRunning) await writeB3Control(server, 'start');
+        }
+        res.locals.activityDetail = `B3 restore ${file}`;
+        return res.json({ success: true, restarted: wasRunning });
+    } catch (error) {
+        return fail(res, error, 'Restore failed');
+    }
+});
+
+// a plugin added from the Admin page: <name>.py into extplugins (and its config into extplugins/conf), optionally
+// turned on in b3.xml
+const PLUGIN_NAME = /^[a-z][a-z0-9_]{0,40}$/;
+
+async function b3Dirs(server: GameServerRow) {
+    const file = await findB3Config(server.id);
+    if (!file || !file.endsWith('.xml')) throw Object.assign(new Error('B3 with a b3.xml is not installed on this server.'), { statusCode: 409 });
+    const b3Root = path.dirname(path.dirname(file));
+    return { file, extDir: path.join(b3Root, 'extplugins') };
+}
+
+async function addPluginLine(file: string, name: string, config: string | null): Promise<boolean> {
+    const content = await fs.readFile(file, 'utf8');
+    if (content.split('\n').some((line) => PLUGIN_LINE.exec(line)?.[4] === name)) return false;
+    const closing = content.lastIndexOf('</plugins>');
+    if (closing < 0) throw Object.assign(new Error('b3.xml has no <plugins> section'), { statusCode: 409 });
+    const lineStart = content.lastIndexOf('\n', closing) + 1;
+    const indent = `${content.slice(lineStart, closing).match(/^\s*/)?.[0] ?? ''}    `;
+    const tag = config ? `<plugin name="${name}" config="${config}"/>` : `<plugin name="${name}"/>`;
+    const next = `${content.slice(0, lineStart)}${indent}${tag}\n${content.slice(lineStart)}`;
+    await fs.writeFile(`${file}.tmp`, next, 'utf8');
+    await fs.rename(`${file}.tmp`, file);
+    return true;
+}
+
+router.post('/servers/:id/b3/plugins-upload', async (req: AuthenticatedRequest, res: Response) => {
+    try {
+        const server = await cod4Server(req.params.id);
+        const { file, extDir } = await b3Dirs(server);
+        const name = String(req.body?.name ?? '').trim().toLowerCase();
+        if (!PLUGIN_NAME.test(name) || name === '__init__') throw badRequest('Plugin name: small letters, numbers and _ (the .py file name)');
+        const code = String(req.body?.code ?? '');
+        if (!code.trim() || code.length > 2_000_000) throw badRequest('The .py file is empty or too big');
+        const configText = typeof req.body?.config === 'string' ? req.body.config : '';
+        const configName = String(req.body?.configName ?? '').trim();
+        if (configText && !/^[A-Za-z0-9_.-]{1,64}\.(ini|xml)$/.test(configName)) throw badRequest('Config file: a .ini or .xml name');
+        await fs.mkdir(extDir, { recursive: true });
+        await fs.writeFile(path.join(extDir, `${name}.py`), code, 'utf8');
+        let config: string | null = null;
+        if (configText) {
+            await fs.mkdir(path.join(extDir, 'conf'), { recursive: true });
+            await fs.writeFile(path.join(extDir, 'conf', configName), configText, 'utf8');
+            config = `@b3/extplugins/conf/${configName}`;
+        }
+        const added = req.body?.enable ? await addPluginLine(file, name, config) : false;
+        if (req.body?.restart) await writeB3Control(server, 'restart');
+        res.locals.activityDetail = `B3 plugin ${name} uploaded${added ? ' and added to b3.xml' : ''}`;
+        return res.json({ success: true, added });
+    } catch (error) {
+        return fail(res, error, 'Could not upload the plugin');
+    }
+});
+
+// a plugin from extplugins that is not in b3.xml yet
+router.post('/servers/:id/b3/plugins/:name/add', async (req: AuthenticatedRequest, res: Response) => {
+    try {
+        const server = await cod4Server(req.params.id);
+        const { file, extDir } = await b3Dirs(server);
+        const name = req.params.name;
+        if (!PLUGIN_NAME.test(name)) throw badRequest('Invalid plugin name');
+        if (!(await exists(path.join(extDir, `${name}.py`)))) throw Object.assign(new Error(`extplugins/${name}.py not found`), { statusCode: 404 });
+        let config: string | null = null;
+        for (const candidate of [`plugin_${name}.ini`, `${name}.ini`, `plugin_${name}.xml`, `${name}.xml`]) {
+            if (await exists(path.join(extDir, 'conf', candidate))) {
+                config = `@b3/extplugins/conf/${candidate}`;
+                break;
+            }
+        }
+        if (!(await addPluginLine(file, name, config))) throw Object.assign(new Error('The plugin is already in b3.xml'), { statusCode: 409 });
+        if (req.body?.restart) await writeB3Control(server, 'restart');
+        res.locals.activityDetail = `B3 plugin ${name} added to b3.xml`;
+        return res.json({ success: true, config });
+    } catch (error) {
+        return fail(res, error, 'Could not add the plugin');
+    }
+});
+
+// ---- server.cfg (main/cod4server.cfg: what +exec loads at start)
+const serverCfgPath = (server: GameServerRow) => path.join(serverfiles(server), 'main', 'cod4server.cfg');
+
+router.get('/servers/:id/servercfg', async (req: AuthenticatedRequest, res: Response) => {
+    try {
+        const server = await cod4Server(req.params.id);
+        const content = await fs.readFile(serverCfgPath(server), 'utf8').catch(() => null);
+        return res.json({ file: 'serverfiles/main/cod4server.cfg', exists: content !== null, content: content ?? '' });
+    } catch (error) {
+        return fail(res, error, 'Could not read server.cfg');
+    }
+});
+
+router.put('/servers/:id/servercfg', async (req: AuthenticatedRequest, res: Response) => {
+    try {
+        const server = await cod4Server(req.params.id);
+        const content = String(req.body?.content ?? '');
+        if (content.length > 200_000) throw badRequest('The config is too long');
+        const file = serverCfgPath(server);
+        await fs.mkdir(path.dirname(file), { recursive: true });
+        // a new file: the config may be a hard link shared with the cod4-linux folder
+        await fs.writeFile(`${file}.tmp`, content, 'utf8');
+        await fs.rename(`${file}.tmp`, file);
+        res.locals.activityDetail = 'server.cfg saved';
+        return res.json({ success: true });
+    } catch (error) {
+        return fail(res, error, 'Could not save server.cfg');
+    }
+});
+
+// ---- backups (configs + B3 database), automatic backups and defaults for new servers
+router.get('/settings', async (_req: AuthenticatedRequest, res: Response) => {
+    try {
+        return res.json(await readAdminSettings());
+    } catch (error) {
+        return fail(res, error, 'Could not read the settings');
+    }
+});
+
+router.put('/settings', async (req: AuthenticatedRequest, res: Response) => {
+    try {
+        const body = (req.body ?? {}) as Record<string, unknown>;
+        // lastRun is the scheduler's own
+        const patch = { cod4Defaults: body.cod4Defaults, autoBackup: body.autoBackup ? { ...(body.autoBackup as object), lastRun: undefined } : undefined };
+        return res.json(await writeAdminSettings(patch));
+    } catch (error) {
+        return fail(res, error, 'Could not save the settings');
+    }
+});
+
+router.get('/servers/:id/backups', async (req: AuthenticatedRequest, res: Response) => {
+    try {
+        const server = await cod4Server(req.params.id);
+        return res.json({ backups: await listBackups(server.id), b3: Boolean(await findB3Config(server.id)) });
+    } catch (error) {
+        return fail(res, error, 'Could not list the backups');
+    }
+});
+
+router.post('/servers/:id/backups/configs', async (req: AuthenticatedRequest, res: Response) => {
+    try {
+        const server = await cod4Server(req.params.id);
+        return res.json(await backupServerConfigs(server.id));
+    } catch (error) {
+        return fail(res, error, 'Backup failed');
+    }
+});
+
+router.delete('/servers/:id/backups', async (req: AuthenticatedRequest, res: Response) => {
+    try {
+        const server = await cod4Server(req.params.id);
+        const rel = String(req.query.path ?? '');
+        await deleteBackup(server.id, rel);
+        res.locals.activityDetail = `deleted backup ${rel}`;
+        return res.json({ success: true });
+    } catch (error) {
+        return fail(res, error, 'Could not delete the backup');
+    }
+});
+
+// a config backup back in place (the files that are in it)
+router.post('/servers/:id/backups/configs/restore', async (req: AuthenticatedRequest, res: Response) => {
+    try {
+        const server = await cod4Server(req.params.id);
+        const rel = String(req.body?.path ?? '');
+        if (!/^config-backups\/[0-9-]+$/.test(rel)) throw badRequest('Invalid backup');
+        const dataDir = getServerStoragePaths(server.id).dataDir;
+        const from = path.join(dataDir, rel);
+        const b3Config = await findB3Config(server.id);
+        const targets: Array<[string, string | null]> = [
+            ['config-lgsm', path.join(dataDir, 'config-lgsm', 'cod4server')],
+            ['main', path.join(dataDir, 'serverfiles', 'main')],
+            ['b3-conf', b3Config ? path.dirname(b3Config) : null],
+        ];
+        let files = 0;
+        for (const [sub, to] of targets) {
+            if (!to) continue;
+            for (const entry of await fs.readdir(path.join(from, sub), { withFileTypes: true }).catch(() => [])) {
+                if (!entry.isFile()) continue;
+                await fs.mkdir(to, { recursive: true });
+                await fs.copyFile(path.join(from, sub, entry.name), path.join(to, `${entry.name}.tmp`));
+                await fs.rename(path.join(to, `${entry.name}.tmp`), path.join(to, entry.name));
+                files++;
+            }
+        }
+        res.locals.activityDetail = `restored ${rel}`;
+        return res.json({ success: true, files });
+    } catch (error) {
+        return fail(res, error, 'Restore failed');
+    }
+});
+
+router.post('/backups/run-now', async (_req: AuthenticatedRequest, res: Response) => {
+    try {
+        return res.json(await runAutoBackup());
+    } catch (error) {
+        return fail(res, error, 'Backup failed');
+    }
+});
+
+// every CoD4 server's B3 database, and phpMyAdmin when one runs next to the panel
+async function findPhpMyAdmin(): Promise<{ url: string | null; container: string } | null> {
+    const list = await docker.listContainers().catch(() => []);
+    const pma = list.find((c) => /phpmyadmin/i.test(c.Image) || (c.Names ?? []).some((n) => /pma|phpmyadmin/i.test(n)));
+    if (!pma) return null;
+    const container = (pma.Names?.[0] ?? '').replace(/^\//, '');
+    const labels = pma.Labels ?? {};
+    for (const [key, value] of Object.entries(labels)) {
+        if (!/^traefik\.http\.routers\..+\.rule$/.test(key)) continue;
+        const host = /Host\(`([^`]+)`\)/.exec(value)?.[1] ?? getConfig().domain;
+        const prefix = /PathPrefix\(`([^`]+)`\)/.exec(value)?.[1] ?? '/';
+        return { url: `https://${host}${prefix.endsWith('/') ? prefix : `${prefix}/`}`, container };
+    }
+    const port = pma.Ports?.find((p) => p.PublicPort)?.PublicPort;
+    return { url: port ? `http://${getConfig().domain}:${port}/` : null, container };
+}
+
+router.get('/databases', async (_req: AuthenticatedRequest, res: Response) => {
+    try {
+        const servers = (await serverRepository.listAll()).filter((s) => s.catalog_id === 'cod4');
+        const dbRunning = await docker
+            .getContainer('gamepanel-b3-db')
+            .inspect()
+            .then((c) => Boolean(c.State?.Running))
+            .catch(() => false);
+        const databases = await Promise.all(
+            servers.map(async (server) => {
+                if (!(await findB3Config(server.id))) return { serverId: server.id, serverName: server.name, database: null, user: null, size: null, error: null };
+                try {
+                    const db = await readB3Database(server.id);
+                    const size = dbRunning ? await b3DatabaseSize(server.id).catch(() => null) : null;
+                    return { serverId: server.id, serverName: server.name, database: db.database, user: db.user, size, error: null };
+                } catch (error) {
+                    return { serverId: server.id, serverName: server.name, database: null, user: null, size: null, error: error instanceof Error ? error.message : String(error) };
+                }
+            })
+        );
+        return res.json({ dbRunning, phpMyAdmin: await findPhpMyAdmin(), databases });
+    } catch (error) {
+        return fail(res, error, 'Could not list the databases');
+    }
+});
+
+// ---- the cod4-linux folder (game files new servers get): status, and filling it from one of the servers
+type RefreshState = { running: boolean; serverId: number | null; startedAt: number | null; finishedAt: number | null; linked: number; copied: number; error: string | null };
+const refresh: RefreshState = { running: false, serverId: null, startedAt: null, finishedAt: null, linked: 0, copied: 0, error: null };
+
+async function isProgram(file: string): Promise<boolean> {
+    const handle = await fs.open(file, 'r');
+    try {
+        const buffer = Buffer.alloc(4);
+        await handle.read(buffer, 0, 4, 0);
+        return buffer.equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46]));
+    } finally {
+        await handle.close();
+    }
+}
+
+// like "bash gp-cod4-linux.sh <server>": big game files hard-linked, programs and small files copied, no logs
+async function fillFrom(src: string, dst: string, top = true): Promise<void> {
+    await fs.mkdir(dst, { recursive: true });
+    for (const entry of await fs.readdir(src, { withFileTypes: true })) {
+        if (top && entry.name === 'Logs') continue;
+        const a = path.join(src, entry.name);
+        const b = path.join(dst, entry.name);
+        if (entry.isSymbolicLink()) {
+            await fs.symlink(await fs.readlink(a), b);
+        } else if (entry.isDirectory()) {
+            await fillFrom(a, b, false);
+        } else if (entry.isFile()) {
+            const lower = entry.name.toLowerCase();
+            if (lower.endsWith('.log') || lower.includes('.log.')) continue;
+            const st = await fs.stat(a);
+            if (st.size >= 1024 * 1024 && !(await isProgram(a))) {
+                try {
+                    await fs.link(a, b);
+                    refresh.linked++;
+                    continue;
+                } catch {
+                    // another disk: copy
+                }
+            }
+            await fs.copyFile(a, b);
+            await fs.chmod(b, st.mode & 0o7777);
+            refresh.copied++;
+        }
+    }
+}
+
+async function folderSummary(dir: string) {
+    const count = async (sub: string, pattern?: RegExp) =>
+        (await fs.readdir(path.join(dir, sub)).catch(() => [] as string[])).filter((n) => !pattern || pattern.test(n)).length;
+    const dedrun = await fs.stat(path.join(dir, 'cod4x18_dedrun')).catch(() => null);
+    return {
+        iwd: await count('main', /\.iwd$/i),
+        zone: await count('zone'),
+        mods: await count('mods'),
+        usermaps: await count('usermaps'),
+        dedrunTime: dedrun ? dedrun.mtimeMs : null,
+    };
+}
+
+router.get('/cod4-files', async (_req: AuthenticatedRequest, res: Response) => {
+    try {
+        const dir = cod4FilesDir();
+        const status = await checkCod4Files();
+        const servers = (await serverRepository.listAll())
+            .filter((s) => s.catalog_id === 'cod4')
+            .map((s) => ({ id: s.id, name: s.name }));
+        const size = (await folderSizes((await serverRepository.listAll()).map((r) => r.id)).catch(() => null))?.['cod4-linux'] ?? null;
+        return res.json({ ...status, hostFolder: cod4FilesHostDir(), summary: await folderSummary(dir), size, servers, refresh });
+    } catch (error) {
+        return fail(res, error, 'Could not check the cod4-linux folder');
+    }
+});
+
+router.post('/cod4-files/refresh', async (req: AuthenticatedRequest, res: Response) => {
+    try {
+        if (refresh.running) throw Object.assign(new Error('Already filling the folder'), { statusCode: 409 });
+        const server = await cod4Server(req.body?.serverId);
+        const src = serverfiles(server);
+        if (!(await exists(path.join(src, 'cod4x18_dedrun')))) {
+            throw Object.assign(new Error(`${server.name} has no CoD4X files (serverfiles/cod4x18_dedrun)`), { statusCode: 409 });
+        }
+        const dir = cod4FilesDir();
+        Object.assign(refresh, { running: true, serverId: server.id, startedAt: Date.now(), finishedAt: null, linked: 0, copied: 0, error: null });
+        res.locals.activityDetail = `cod4-linux filled from server ${server.id}`;
+        res.json({ started: true });
+        // in the background: a few GB copied (when the server is on another disk) takes a while
+        void (async () => {
+            try {
+                await fs.rm(`${dir}.new`, { recursive: true, force: true });
+                await fs.rm(`${dir}.old`, { recursive: true, force: true });
+                await fillFrom(src, `${dir}.new`);
+                // servers installed earlier keep their files (hard links), only the folder's own entries go
+                await fs.rename(dir, `${dir}.old`).catch(() => undefined);
+                await fs.rename(`${dir}.new`, dir);
+                await fs.rm(`${dir}.old`, { recursive: true, force: true });
+                sizeCache = null;
+            } catch (error) {
+                refresh.error = error instanceof Error ? error.message : String(error);
+                await fs.rm(`${dir}.new`, { recursive: true, force: true }).catch(() => undefined);
+            } finally {
+                refresh.running = false;
+                refresh.finishedAt = Date.now();
+            }
+        })();
+        return undefined;
+    } catch (error) {
+        return fail(res, error, 'Could not fill the folder');
+    }
+});
+
+// ---- panel look (default theme for new visitors, login page footer); the name is set from the sidebar
+router.put('/appearance', async (req: AuthenticatedRequest, res: Response) => {
+    try {
+        const body = (req.body ?? {}) as Record<string, unknown>;
+        const patch: Record<string, unknown> = {};
+        if ('defaultTheme' in body) patch.defaultTheme = body.defaultTheme;
+        if ('loginFooter' in body) patch.loginFooter = body.loginFooter;
+        return res.json(await writeBranding(patch));
+    } catch (error) {
+        return fail(res, error, 'Could not save the look');
     }
 });
 

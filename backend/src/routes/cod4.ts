@@ -8,13 +8,14 @@ import { PERMISSIONS } from '../permissions.js';
 import { docker } from '../utils/docker/client.js';
 import { getServerStoragePaths } from '../utils/storage.js';
 import { parsePositiveIntId } from '../utils/ids.js';
+import { readAdminSettings } from '../services/cod4/settings.js';
 
 // Call of Duty 4: are the game files (cod4-linux folder) and the local image ready? Shown in the install form.
 const router = Router();
 
 router.get('/files', authMiddleware, async (_req: AuthenticatedRequest, res: Response) => {
     try {
-        res.json(await checkCod4Files());
+        res.json({ ...(await checkCod4Files()), defaultSlots: (await readAdminSettings()).cod4Defaults.slots });
     } catch (error) {
         res.status(500).json({ error: error instanceof Error ? error.message : 'Could not check the CoD4 files' });
     }

@@ -531,12 +531,23 @@ function ConfigModal({
   // CoD4 installs only from the cod4-linux folder on the panel server: check it before the install can start
   const [cod4Files, setCod4Files] = React.useState<Cod4FilesStatus | null>(null);
   const [cod4FilesError, setCod4FilesError] = React.useState<string | null>(null);
+  const [cod4DefaultSlots, setCod4DefaultSlots] = React.useState<number | null>(null);
+  React.useEffect(() => {
+    // only while the form still shows the built-in 32
+    if (showCod4Fields && cod4DefaultSlots !== null && cod4DefaultSlots !== 32 && cod4Slots === '32') setCod4Slots(String(cod4DefaultSlots));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cod4DefaultSlots]);
   const checkCod4Files = React.useCallback(() => {
     setCod4Files(null);
     setCod4FilesError(null);
     apiClient
       .getCod4FilesStatus()
-      .then(setCod4Files)
+      .then((status) => {
+        setCod4Files(status);
+        // Admin → CoD4 files: slots of new servers
+        const slots = (status as Cod4FilesStatus & { defaultSlots?: number }).defaultSlots;
+        if (typeof slots === 'number') setCod4DefaultSlots(slots);
+      })
       .catch((e) => setCod4FilesError(e?.response?.data?.error ?? 'Could not check the CoD4 files.'));
   }, []);
   React.useEffect(() => {

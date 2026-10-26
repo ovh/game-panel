@@ -14,13 +14,15 @@ FILES = {
                 'src/routes/users.ts', 'src/database/repositories/userRepository.ts', 'src/routes/news.ts',
                 # theme and panel name (formerly gp-neon-theme.sh), Admin page
                 'src/routes/branding.ts', 'src/routes/admin.ts',
-                'src/services/cod4/tools.ts', 'src/services/cod4/b3db.ts', 'src/middleware/activityLog.ts',
+                'src/services/cod4/tools.ts', 'src/services/cod4/b3db.ts', 'src/services/cod4/settings.ts', 'src/services/cod4/backups.ts',
+                'src/services/cod4/b3install.ts', 'src/services/cod4/cert.ts', 'src/middleware/activityLog.ts',
                 'src/services/players/probe.ts'],
     'frontend': ['components/InstallGameServer.tsx', 'components/serverSettings/Cod4ModSection.tsx',
                  'components/UserAdministration.tsx', 'components/userAdministration/UsersPanel.tsx',
                  'components/NewsPanel.tsx', 'components/admin/AdminPage.tsx', 'components/admin/shared.tsx',
                  'components/admin/AdminLive.tsx', 'components/admin/AdminMaps.tsx', 'components/admin/AdminContent.tsx',
-                 'components/admin/AdminB3.tsx', 'components/admin/AdminActivity.tsx', 'utils/adminApi.ts',
+                 'components/admin/AdminB3.tsx', 'components/admin/AdminActivity.tsx', 'components/admin/AdminServerCfg.tsx',
+                 'components/admin/AdminBackups.tsx', 'components/admin/AdminCod4Files.tsx', 'utils/adminApi.ts',
                  # theme and panel name (formerly gp-neon-theme.sh)
                  'main.tsx', 'App.tsx', 'components/Sidebar.tsx', 'components/Login.tsx', 'components/app/AppShell.tsx',
                  'contexts/ThemeContext.tsx', 'contexts/BrandingContext.tsx', 'src/ui/theme/neon.css'],
