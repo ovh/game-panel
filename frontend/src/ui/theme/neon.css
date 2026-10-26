@@ -80,27 +80,6 @@ html.gp-neon body::before {
   will-change: transform;
 }
 
-/* ── animated background: perspective grid scrolling towards the viewer ── */
-html.gp-neon body::after {
-  content: '';
-  position: fixed;
-  left: -50%;
-  right: -50%;
-  bottom: 0;
-  height: 48vh;
-  z-index: -1;
-  pointer-events: none;
-  background-image:
-    linear-gradient(rgb(var(--neon-a) / 0.16) 1px, transparent 1px),
-    linear-gradient(90deg, rgb(var(--neon-b) / 0.16) 1px, transparent 1px);
-  background-size: 56px 56px;
-  transform: perspective(420px) rotateX(62deg);
-  transform-origin: bottom center;
-  -webkit-mask-image: linear-gradient(to top, #000 10%, transparent 85%);
-  mask-image: linear-gradient(to top, #000 10%, transparent 85%);
-  animation: gp-neon-grid 5s linear infinite;
-}
-
 /* ── glass surfaces ── */
 html.gp-neon .bg-gp-surface-base {
   background-color: rgba(5, 8, 22, 0.5);
@@ -367,12 +346,6 @@ html.gp-neon .gp-login-submit:not(:disabled) {
   }
 }
 
-@keyframes gp-neon-grid {
-  to {
-    background-position: 0 56px, 0 0;
-  }
-}
-
 @keyframes gp-neon-flow {
   to {
     background-position: 300% 0;
@@ -400,7 +373,6 @@ html.gp-neon .gp-login-submit:not(:disabled) {
 
 @media (prefers-reduced-motion: reduce) {
   html.gp-neon body::before,
-  html.gp-neon body::after,
   html.gp-neon aside.border-r,
   html.gp-neon aside img,
   html.gp-neon .gp-neon-toggle,

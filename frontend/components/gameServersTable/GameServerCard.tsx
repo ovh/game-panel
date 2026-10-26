@@ -24,6 +24,7 @@ import {
 import { canOpenServerSettings, formatNetworkSpeed, formatPlayerCount, hasServerPermission, playersHaveNames, type MetricType } from './utils';
 import { getServerStatusPresentation } from './utils';
 import { ODS_CHART_THEME } from '../charts/theme';
+import { GameIcon } from './GameIcon';
 import { AppButton } from '../../src/ui/components';
 
 export type ConfirmServerAction = 'start' | 'stop' | 'restart' | 'delete';
@@ -172,6 +173,7 @@ export function GameServerCard({
                   <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" />
                 </span>
               )}
+              <GameIcon server={server} />
               <h3 className={`min-w-0 font-semibold truncate ${TEXT_PRIMARY}`} title={server.name}>
                 {server.name}
               </h3>

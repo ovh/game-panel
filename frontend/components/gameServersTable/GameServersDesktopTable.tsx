@@ -40,6 +40,7 @@ import {
   getServerStatusPresentation,
   hasServerPermission,
 } from './utils';
+import { GameIcon } from './GameIcon';
 import { ODS_CHART_THEME } from '../charts/theme';
 
 interface ConfirmActionState {
@@ -384,6 +385,7 @@ export function GameServersDesktopTable({
                     </div>
                   ) : (
                     <div className="flex items-center gap-2 group">
+                      <GameIcon server={server} />
                       <span>{server.name}</span>
                       <AppButton
                         onClick={() => {
